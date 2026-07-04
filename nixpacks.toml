@@ -1,0 +1,11 @@
+[phases.setup]
+nixPkgs = ["python312", "postgresql"]
+
+[phases.install]
+cmds = ["pip install -U pip", "pip install -r api/requirements.txt -r engine/requirements.txt -r workers/requirements.txt -r bot/requirements.txt"]
+
+[phases.build]
+cmds = ["python -m compileall -q engine bot workers shared api/app"]
+
+[start]
+cmd = "alembic --config api/alembic.ini upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT --app-dir api"

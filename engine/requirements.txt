@@ -1,0 +1,13 @@
+sqlalchemy
+psycopg[binary]
+pydantic
+pydantic-settings
+python-dotenv
+
+anthropic
+google-genai
+
+apify-client
+python-whois
+httpx
+beautifulsoup4

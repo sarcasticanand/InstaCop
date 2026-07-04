@@ -1,0 +1,3 @@
+# One public Telegram channel/group username per line (no @, no URL).
+# Populated manually by the operator per BUILD SPEC §9.3 — used by the
+# Telethon ingestion worker in Phase 3.

@@ -1,0 +1,24 @@
+# Railway multi-service config.
+# Create three services in Railway dashboard, all pointing at this repo.
+# Set the startCommand per service (overrides [deploy] below), or use the
+# service-level override in the Railway UI.
+#
+# Service 1 — api  (also runs the Telegram webhook via bot/webhook.py)
+# Service 2 — worker
+# Service 3 — scheduler
+#
+# All three share the same env vars from Railway's shared Variables tab.
+
+[build]
+builder = "nixpacks"
+
+[deploy]
+# Default start command (used by the "api" service).
+# Override in Railway UI for worker/scheduler services:
+#   worker:    OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES rq worker checks --worker-class rq.SimpleWorker --url $REDIS_URL
+#   scheduler: python -m workers.scheduler
+startCommand = "alembic --config api/alembic.ini upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT --app-dir api"
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 5

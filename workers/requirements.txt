@@ -1,0 +1,8 @@
+# RQ worker + ingestion deps (engine deps come from engine/requirements.txt)
+redis
+rq
+httpx
+beautifulsoup4
+praw
+telethon
+sentry-sdk

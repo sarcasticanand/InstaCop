@@ -1,0 +1,9 @@
+aiogram
+redis
+rq
+httpx
+google-genai
+sqlalchemy
+psycopg[binary]
+pydantic-settings
+sentry-sdk

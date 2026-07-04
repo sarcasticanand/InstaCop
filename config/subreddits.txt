@@ -1,0 +1,18 @@
+# One subreddit per line (no r/ prefix needed, but tolerated). The Reddit
+# brand-review fetcher iterates this file — add niches without a code change.
+india
+IndiaSocial
+onlineshopping
+IndianFashionAddicts
+IndianStreetBets
+IndianSkincareAddicts
+DesiFashion
+delhi
+mumbai
+bangalore
+kolkata
+pune
+hyderabad
+Chandigarh
+ABCDesis
+instaindia
