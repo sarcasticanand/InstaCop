@@ -37,6 +37,7 @@ class Settings(BaseSettings):
 
     MAX_COLD_CHECKS_PER_DAY: int = 200
     BOT_ALLOWLIST: str = ""  # comma-separated Telegram user ids; empty = open
+    ADMIN_USER_IDS: str = ""  # comma-separated Telegram user ids exempt from rate limits (operators)
 
     REDDIT_CLIENT_ID: str = ""
     REDDIT_CLIENT_SECRET: str = ""

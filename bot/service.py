@@ -53,11 +53,20 @@ def _bump_daily(key: str, limit: int) -> bool:
     return count <= limit
 
 
+def _is_admin(user_id: int) -> bool:
+    admins = {x.strip() for x in settings.ADMIN_USER_IDS.split(",") if x.strip()}
+    return str(user_id) in admins
+
+
 def allow_cold_check(user_id: int) -> bool:
+    if _is_admin(user_id):
+        return True
     return _bump_daily(f"rl:cold:{user_id}", COLD_CHECKS_PER_USER_PER_DAY)
 
 
 def allow_cached_check(user_id: int) -> bool:
+    if _is_admin(user_id):
+        return True
     return _bump_daily(f"rl:cached:{user_id}", CACHED_CHECKS_PER_USER_PER_DAY)
 
 
