@@ -210,7 +210,9 @@ class InstaloaderIGProvider(IGProvider):
     Works for public profiles only — private profiles raise IGProviderError.
     """
 
-    INTER_REQUEST_DELAY = 2.0  # seconds between Instagram requests
+    # Instaloader already sleeps 0.5-3s between requests internally; this is
+    # extra padding between our fetch phases, not the only rate limiting.
+    INTER_REQUEST_DELAY = 1.0
     MAX_POSTS = 12
     MAX_TAGGED = 8
     COMMENT_POSTS_PER_RUN = 3
