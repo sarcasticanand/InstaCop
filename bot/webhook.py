@@ -35,18 +35,17 @@ def mount_webhook(app: FastAPI) -> None:
                 url=webhook_url,
                 secret_token=settings.WEBHOOK_SECRET or None,
                 allowed_updates=["message", "callback_query"],
-                drop_pending_updates=True,
+                drop_pending_updates=False,
             )
             logger.info("webhook registered at %s", webhook_url)
         except Exception as exc:
             logger.error("webhook registration failed: %s", exc)
 
     @app.on_event("shutdown")
-    async def _drop_webhook():
-        try:
-            await bot.delete_webhook(drop_pending_updates=False)
-        except Exception:
-            pass
+    async def _close_session():
+        # NOTE: deliberately do NOT delete_webhook here. Free-tier hosts spin
+        # the process down when idle; the webhook must stay registered so
+        # Telegram's next POST wakes the service back up.
         await bot.session.close()
 
     @router.post("/telegram/webhook")
