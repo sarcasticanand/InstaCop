@@ -30,13 +30,14 @@ def mount_webhook(app: FastAPI) -> None:
     @app.on_event("startup")
     async def _register_webhook():
         try:
+            webhook_url = settings.WEBHOOK_URL.rstrip("/") + "/telegram/webhook"
             await bot.set_webhook(
-                url=settings.WEBHOOK_URL,
+                url=webhook_url,
                 secret_token=settings.WEBHOOK_SECRET or None,
                 allowed_updates=["message", "callback_query"],
                 drop_pending_updates=True,
             )
-            logger.info("webhook registered at %s", settings.WEBHOOK_URL)
+            logger.info("webhook registered at %s", webhook_url)
         except Exception as exc:
             logger.error("webhook registration failed: %s", exc)
 
