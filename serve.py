@@ -31,12 +31,18 @@ def run_worker():
     signal handling disabled (signals only work in main thread)."""
     import redis
     from rq import Queue, SimpleWorker
+    from rq.timeouts import TimerDeathPenalty
     from shared.config import settings
+
+    class ThreadWorker(SimpleWorker):
+        # SIGALRM-based job timeouts don't work outside the main thread;
+        # TimerDeathPenalty is RQ's thread-safe alternative.
+        death_penalty_class = TimerDeathPenalty
 
     logger.info("worker thread started")
     conn = redis.from_url(settings.REDIS_URL)
     queues = [Queue("checks", connection=conn)]
-    worker = SimpleWorker(queues, connection=conn)
+    worker = ThreadWorker(queues, connection=conn)
     # Disable signal handlers since we're in a thread
     worker._install_signal_handlers = lambda: None
     worker.work()
