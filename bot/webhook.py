@@ -53,7 +53,11 @@ def mount_webhook(app: FastAPI) -> None:
         request: Request,
         x_telegram_bot_api_secret_token: str = Header(default=""),
     ):
-        if settings.WEBHOOK_SECRET and x_telegram_bot_api_secret_token != settings.WEBHOOK_SECRET:
+        import hmac
+
+        if settings.WEBHOOK_SECRET and not hmac.compare_digest(
+            x_telegram_bot_api_secret_token, settings.WEBHOOK_SECRET
+        ):
             raise HTTPException(401, "bad secret")
         update = await request.json()
         await dp.feed_webhook_update(bot, update)

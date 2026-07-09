@@ -2,15 +2,15 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: trustkaro
-      POSTGRES_PASSWORD: trustkaro
-      POSTGRES_DB: trustkaro
+      POSTGRES_USER: instacop
+      POSTGRES_PASSWORD: instacop
+      POSTGRES_DB: instacop
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U trustkaro"]
+      test: ["CMD-SHELL", "pg_isready -U instacop"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -32,7 +32,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql+psycopg://trustkaro:trustkaro@postgres:5432/trustkaro
+      DATABASE_URL: postgresql+psycopg://instacop:instacop@postgres:5432/instacop
       REDIS_URL: redis://redis:6379/0
     ports:
       - "8000:8000"

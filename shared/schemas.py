@@ -49,7 +49,7 @@ class IGProfile(BaseModel):
     tagged_posts: list[IGTag] = Field(default_factory=list)
     comments: list[IGComment] = Field(default_factory=list)
     tagged_post_comments: list[IGComment] = Field(default_factory=list)
-    source: Literal["apify", "screenshot_vision"] = "apify"
+    source: Literal["apify", "instaloader", "screenshot_vision"] = "apify"
     fetched_at: datetime = Field(default_factory=datetime.utcnow)
     raw: dict = Field(default_factory=dict)
 

@@ -1,5 +1,5 @@
 {
-  "name": "trustkaro-web",
+  "name": "instacop-web",
   "private": true,
   "scripts": {
     "dev": "next dev",

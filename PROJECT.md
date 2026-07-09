@@ -1,4 +1,4 @@
-# TrustKaro — Project Documentation
+# InstaCop — Project Documentation
 
 *Last updated: 2 July 2026. Status: **all 7 build phases complete, full stack running locally, bot live as [@capdetector_bot](https://t.me/capdetector_bot).***
 

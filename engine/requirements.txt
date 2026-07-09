@@ -8,6 +8,7 @@ anthropic
 google-genai
 
 apify-client
+instaloader
 python-whois
 httpx
 beautifulsoup4

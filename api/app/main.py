@@ -13,7 +13,7 @@ from shared.observability import init_sentry
 
 init_sentry("api")
 
-app = FastAPI(title="TrustKaro API")
+app = FastAPI(title="InstaCop API")
 
 _cors_origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
 app.add_middleware(
@@ -108,7 +108,7 @@ def get_seller(handle: str, db: Session = Depends(get_db)):
 
 
 @app.get("/api/sellers")
-def list_sellers(limit: int = 5000, db: Session = Depends(get_db)):
+def list_sellers(limit: int = 500, db: Session = Depends(get_db)):
     """PUBLISHABLE sellers only — this feeds the sitemap, so the E2 gate
     applies here: thin algorithmic verdicts never reach an indexed URL."""
     from engine.publication import is_publishable
@@ -143,7 +143,9 @@ def list_sellers(limit: int = 5000, db: Session = Depends(get_db)):
 # --- admin (Phase 6/7) -------------------------------------------------------
 
 def require_admin(x_admin_token: str = Header(default="")):
-    if not settings.ADMIN_TOKEN or x_admin_token != settings.ADMIN_TOKEN:
+    import hmac
+
+    if not settings.ADMIN_TOKEN or not hmac.compare_digest(x_admin_token, settings.ADMIN_TOKEN):
         raise HTTPException(401, "bad admin token")
 
 

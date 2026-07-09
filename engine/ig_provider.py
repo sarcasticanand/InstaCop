@@ -1,14 +1,14 @@
 """Single entry point for all Instagram access. Callers use get_provider()
 and IGProvider.fetch_profile() only — swapping the underlying data source
-(Apify actors today, something else tomorrow) never touches signal code."""
+(Apify or Instaloader) never touches signal code."""
 
 import json
 import logging
 import re
+import time
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
-
-from apify_client import ApifyClient
+from itertools import islice
 
 from shared.config import settings
 from shared.schemas import IGComment, IGPost, IGProfile, IGTag
@@ -32,6 +32,8 @@ class IGProvider(ABC):
 
 class ApifyIGProvider(IGProvider):
     def __init__(self, token: str | None = None):
+        from apify_client import ApifyClient
+
         self.client = ApifyClient(token or settings.APIFY_TOKEN)
 
     def fetch_profile(self, handle: str) -> tuple[IGProfile, float]:
@@ -201,6 +203,186 @@ class ApifyIGProvider(IGProvider):
         return float(usage_usd) * USD_TO_INR
 
 
+class InstaloaderIGProvider(IGProvider):
+    """Free local scraper using the instaloader library. No API costs.
+
+    Rate-limit mitigation: delays between requests, optional session cookie.
+    Works for public profiles only — private profiles raise IGProviderError.
+    """
+
+    INTER_REQUEST_DELAY = 2.0  # seconds between Instagram requests
+    MAX_POSTS = 12
+    MAX_TAGGED = 8
+    COMMENT_POSTS_PER_RUN = 3
+    COMMENTS_PER_POST = 10
+
+    def __init__(self):
+        import instaloader
+
+        self._L = instaloader.Instaloader(
+            download_pictures=False,
+            download_videos=False,
+            download_video_thumbnails=False,
+            download_geotags=False,
+            download_comments=False,
+            save_metadata=False,
+            compress_json=False,
+            quiet=True,
+        )
+        if settings.IG_SESSION_ID:
+            try:
+                self._L.context._session.cookies.set(
+                    "sessionid", settings.IG_SESSION_ID,
+                    domain=".instagram.com", path="/", secure=True,
+                )
+                logger.info("Instaloader: using session cookie for authenticated access")
+            except Exception as exc:
+                logger.warning("Instaloader: session cookie setup failed: %s", exc)
+
+    def _delay(self):
+        time.sleep(self.INTER_REQUEST_DELAY)
+
+    def fetch_profile(self, handle: str) -> tuple[IGProfile, float]:
+        import instaloader
+
+        handle = handle.lower().lstrip("@")
+
+        try:
+            ig_profile = instaloader.Profile.from_username(self._L.context, handle)
+        except instaloader.ProfileNotExistsException:
+            raise IGProviderError(f"Instagram profile @{handle} does not exist")
+        except instaloader.ConnectionException as exc:
+            raise IGProviderError(f"Instagram connection error for @{handle}: {exc}")
+        except Exception as exc:
+            raise IGProviderError(f"Failed to fetch @{handle}: {exc}")
+
+        if ig_profile.is_private:
+            return IGProfile(
+                handle=handle,
+                ig_user_id=str(ig_profile.userid),
+                display_name=ig_profile.full_name,
+                bio_text=ig_profile.biography,
+                bio_website_url=ig_profile.external_url,
+                follower_count=ig_profile.followers,
+                following_count=ig_profile.followees,
+                post_count=ig_profile.mediacount,
+                is_private=True,
+                source="instaloader",
+                raw={},
+            ), 0.0
+
+        recent_posts: list[IGPost] = []
+        post_objects = []
+        try:
+            for post in islice(ig_profile.get_posts(), self.MAX_POSTS):
+                recent_posts.append(IGPost(
+                    id=str(post.mediaid),
+                    shortcode=post.shortcode,
+                    image_url=post.url,
+                    caption=post.caption,
+                    posted_at=post.date_utc.replace(tzinfo=timezone.utc) if post.date_utc else None,
+                    like_count=post.likes,
+                    comment_count=post.comments,
+                ))
+                post_objects.append(post)
+        except Exception as exc:
+            logger.warning("Instaloader: error fetching posts for @%s: %s", handle, exc)
+
+        oldest_post_at = min(
+            (p.posted_at for p in recent_posts if p.posted_at), default=None
+        )
+
+        comments_disabled = (
+            bool(recent_posts) and
+            all((p.comment_count or 0) == 0 for p in recent_posts)
+        )
+
+        self._delay()
+
+        # Fetch comments from the most-commented own posts
+        comments = self._fetch_comments_from_posts(post_objects)
+
+        self._delay()
+
+        # Fetch tagged posts (posts by others tagging this seller)
+        tagged_posts, tagged_post_comments = self._fetch_tagged(ig_profile)
+
+        profile = IGProfile(
+            handle=handle,
+            ig_user_id=str(ig_profile.userid),
+            display_name=ig_profile.full_name,
+            bio_text=ig_profile.biography,
+            bio_website_url=ig_profile.external_url,
+            follower_count=ig_profile.followers,
+            following_count=ig_profile.followees,
+            post_count=ig_profile.mediacount,
+            is_private=False,
+            comments_disabled=comments_disabled,
+            oldest_post_at=oldest_post_at,
+            recent_posts=recent_posts,
+            comments=comments,
+            tagged_posts=tagged_posts,
+            tagged_post_comments=tagged_post_comments,
+            source="instaloader",
+            raw={},
+        )
+
+        return profile, 0.0
+
+    def _fetch_comments_from_posts(self, post_objects: list) -> list[IGComment]:
+        sorted_posts = sorted(
+            post_objects,
+            key=lambda p: p.comments or 0,
+            reverse=True,
+        )
+        target_posts = [
+            p for p in sorted_posts if (p.comments or 0) > 0
+        ][:self.COMMENT_POSTS_PER_RUN]
+
+        comments: list[IGComment] = []
+        for post in target_posts:
+            try:
+                for i, comment in enumerate(post.get_comments()):
+                    if i >= self.COMMENTS_PER_POST:
+                        break
+                    comments.append(IGComment(
+                        post_id=str(post.mediaid),
+                        author_username=comment.owner.username if comment.owner else None,
+                        text=comment.text,
+                        posted_at=(
+                            comment.created_at_utc.replace(tzinfo=timezone.utc)
+                            if comment.created_at_utc else None
+                        ),
+                    ))
+                self._delay()
+            except Exception as exc:
+                logger.warning("Instaloader: comment fetch failed for post %s: %s", post.shortcode, exc)
+        return comments
+
+    def _fetch_tagged(self, ig_profile) -> tuple[list[IGTag], list[IGComment]]:
+        tagged_posts: list[IGTag] = []
+        tagged_post_objects = []
+
+        try:
+            for post in islice(ig_profile.get_tagged_posts(), self.MAX_TAGGED):
+                tagged_posts.append(IGTag(
+                    post_id=str(post.mediaid),
+                    tagger_username=post.owner_username,
+                    posted_at=(
+                        post.date_utc.replace(tzinfo=timezone.utc)
+                        if post.date_utc else None
+                    ),
+                ))
+                tagged_post_objects.append(post)
+        except Exception as exc:
+            logger.warning("Instaloader: tagged posts fetch failed: %s", exc)
+
+        self._delay()
+
+        tagged_comments = self._fetch_comments_from_posts(tagged_post_objects)
+        return tagged_posts, tagged_comments
+
+
 class ScreenshotVisionIGProvider(IGProvider):
     """Fallback path when Apify is unavailable/blocked: user forwards a
     screenshot instead of a handle, a vision LLM reads what's on screen."""
@@ -249,4 +431,6 @@ class ScreenshotVisionIGProvider(IGProvider):
             return {}
 
 def get_provider() -> IGProvider:
-    return ApifyIGProvider()
+    if settings.IG_PROVIDER == "apify":
+        return ApifyIGProvider()
+    return InstaloaderIGProvider()

@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -29,9 +29,9 @@ PLANS = {"basic": 29900, "featured": 99900}  # paise/month
 class VerificationApplication(BaseModel):
     ig_handle: str = Field(pattern=r"^[a-zA-Z0-9._]{1,30}$")
     legal_name: str = Field(min_length=3, max_length=200)
-    gstin: str = Field(min_length=15, max_length=15)
-    pan_last4: str = Field(min_length=4, max_length=4)
-    contact_email: str
+    gstin: str = Field(pattern=r"^\d{2}[A-Z]{5}\d{4}[A-Z]\d[A-Z\d][A-Z]$")
+    pan_last4: str = Field(pattern=r"^\d{4}$")
+    contact_email: EmailStr
     plan: str = "basic"
 
 
@@ -134,7 +134,7 @@ def _revoke(db: Session, seller: Seller, reason: str) -> None:
 @router.get("/admin/reports", dependencies=[Depends(require_admin)])
 def list_unreviewed_reports(
     include: str = "unreviewed",  # unreviewed|all|quarantined
-    limit: int = 50,
+    limit: int = 50,  # capped at 200 below
     db: Session = Depends(get_db),
 ):
     """E4 triage queue: shows reporter trust + spam score + evidence flag so
@@ -148,7 +148,7 @@ def list_unreviewed_reports(
         q = q.filter(Report.status == "unreviewed")
     elif include == "quarantined":
         q = q.filter(Report.status == "quarantined")
-    rows = q.order_by(Report.created_at.desc()).limit(limit).all()
+    rows = q.order_by(Report.created_at.desc()).limit(min(limit, 200)).all()
     return {
         "reports": [
             {
@@ -195,9 +195,9 @@ def review_report(report_id: int, decision: str, db: Session = Depends(get_db)):
 
 class DisputeSubmission(BaseModel):
     ig_handle: str = Field(pattern=r"^[a-zA-Z0-9._]{1,30}$")
-    contact_email: str
+    contact_email: EmailStr
     statement: str = Field(min_length=20, max_length=4000)
-    evidence_urls: list[str] = []
+    evidence_urls: list[str] = Field(default_factory=list, max_length=10)
 
 
 @router.post("/api/dispute")

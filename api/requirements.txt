@@ -3,7 +3,7 @@ uvicorn[standard]
 sqlalchemy
 alembic
 psycopg[binary]
-pydantic
+pydantic[email]
 pydantic-settings
 python-dotenv
 sentry-sdk[fastapi]

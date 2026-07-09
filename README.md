@@ -1,4 +1,4 @@
-# TrustKaro
+# InstaCop
 
 Trust-check service for Instagram sellers in India. A buyer pastes a shop's
 link and gets a fraud-pattern risk report: 9 algorithmic signals, weighted

@@ -9,7 +9,7 @@ export async function generateMetadata({ params }) {
   const seller = await safeFetch(handle);
   const name = seller?.display_name || `@${handle}`;
   return {
-    title: `Is @${handle} legit? ${name} review & fraud check | TrustKaro`,
+    title: `Is @${handle} legit? ${name} review & fraud check | InstaCop`,
     description: seller
       ? `@${handle}: ${BAND_LABELS[seller.risk_band].label} — matches ${seller.patterns_matched} of ${seller.patterns_total} known fraud patterns. Free automated check.`
       : `Fraud-pattern check for Instagram seller @${handle}.`,

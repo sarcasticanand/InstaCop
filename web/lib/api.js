@@ -1,5 +1,5 @@
 export const API_URL = process.env.API_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-export const BOT_USERNAME = process.env.NEXT_PUBLIC_BOT_USERNAME || "TrustKaroBot";
+export const BOT_USERNAME = process.env.NEXT_PUBLIC_BOT_USERNAME || "InstaCopBot";
 
 export const BAND_LABELS = {
   low: { emoji: "🟢", label: "Low risk", color: "#15803d" },

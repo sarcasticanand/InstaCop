@@ -8,7 +8,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=REPO_ROOT / ".env", extra="ignore")
 
-    DATABASE_URL: str = "postgresql+psycopg://trustkaro:trustkaro@localhost:5432/trustkaro"
+    DATABASE_URL: str = "postgresql+psycopg://instacop:instacop@localhost:5432/instacop"
     REDIS_URL: str = "redis://localhost:6379/0"
 
     TELEGRAM_BOT_TOKEN: str = ""
@@ -32,15 +32,15 @@ class Settings(BaseSettings):
     # PII-bearing calls (payment screenshots: UPI ids, phones, names, amounts)
     # must NOT run on free-tier Gemini (training-permitted terms). Default to
     # Anthropic; if the key is absent in dev, code falls back with a loud warning.
-    MODEL_PII_PROVIDER: str = "anthropic"
-    MODEL_PII: str = "claude-haiku-4-5"
+    MODEL_PII_PROVIDER: str = "gemini"
+    MODEL_PII: str = "gemini-3.1-flash-lite"
 
     MAX_COLD_CHECKS_PER_DAY: int = 200
     BOT_ALLOWLIST: str = ""  # comma-separated Telegram user ids; empty = open
 
     REDDIT_CLIENT_ID: str = ""
     REDDIT_CLIENT_SECRET: str = ""
-    REDDIT_USER_AGENT: str = "trustkaro-ingestion/0.1"
+    REDDIT_USER_AGENT: str = "instacop-ingestion/0.1"
     REDDIT_API_ENABLED: bool = False  # flips PRAW path on once Reddit approves access
     BRAND_REVIEW_STALENESS_DAYS: int = 30
 
@@ -62,7 +62,15 @@ class Settings(BaseSettings):
     WEBHOOK_SECRET: str = ""
 
     # Comma-separated origins for CORS. In prod, set to your web domain,
-    # e.g. "https://trustkaro.in". Defaults to wildcard (dev only).
+    # e.g. "https://instacop.shop". Defaults to wildcard (dev only).
+    # "instaloader" (free, local) or "apify" (paid, cloud). Instaloader is the
+    # default — switch to apify when revenue justifies the $49/mo spend.
+    IG_PROVIDER: str = "instaloader"
+    # Optional: Instagram session cookie for instaloader to avoid rate limits.
+    # Log in via browser, copy the sessionid cookie value. Leave empty for
+    # anonymous scraping (works for public profiles, lower rate limit).
+    IG_SESSION_ID: str = ""
+
     CORS_ORIGINS: str = "*"
 
 

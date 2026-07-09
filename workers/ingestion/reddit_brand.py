@@ -95,7 +95,7 @@ def _subreddit_from_url(url: str) -> str | None:
 
 def _fetch_via_serpapi(db: Session, seller: Seller) -> tuple[int, float]:
     inserted, cost = 0, 0.0
-    client = httpx.Client(timeout=20, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0 (TrustKaroBot)"})
+    client = httpx.Client(timeout=20, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0 (InstaCopBot)"})
     for query in _queries_for(seller.ig_handle):
         try:
             resp = client.get(

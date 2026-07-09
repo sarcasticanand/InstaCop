@@ -15,7 +15,7 @@ from .common import save_mentions
 
 logger = logging.getLogger(__name__)
 
-USER_AGENT = "Mozilla/5.0 (compatible; TrustKaroBot/0.1; +https://trustkaro.example/bot)"
+USER_AGENT = "Mozilla/5.0 (compatible; InstaCopBot/0.1; +https://instacop.shop/bot)"
 DELAY_SECONDS = 3
 
 SITES = [

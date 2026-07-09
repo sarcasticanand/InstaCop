@@ -1,4 +1,4 @@
-"""TrustKaro Telegram bot (aiogram 3).
+"""InstaCop Telegram bot (aiogram 3).
 
 Dev: long polling (`python -m bot.main`). Prod: switch to webhook by setting
 WEBHOOK_URL — see run() below.

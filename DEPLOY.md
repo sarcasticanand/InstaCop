@@ -1,4 +1,4 @@
-# TrustKaro — Deployment Runbook
+# InstaCop — Deployment Runbook
 
 **Status:** Workstreams A–E complete. Local stack fully functional. This runbook covers
 the last mile: getting the migrated shape onto a host.

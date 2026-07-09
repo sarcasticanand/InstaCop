@@ -133,15 +133,7 @@ def get_synth_llm() -> LLMProvider:
 
 
 def get_pii_llm() -> LLMProvider:
-    """PII-bearing vision calls (payment screenshots). Must not run on free-tier
-    Gemini in production — the fallback below exists for keyless dev only."""
-    if settings.MODEL_PII_PROVIDER == "anthropic" and not settings.ANTHROPIC_API_KEY:
-        logger.warning(
-            "PII call falling back to Gemini because ANTHROPIC_API_KEY is unset. "
-            "DO NOT ship this: free-tier Gemini terms permit training on inputs. "
-            "Set ANTHROPIC_API_KEY or point MODEL_PII_* at a paid tier."
-        )
-        return _build("gemini", settings.MODEL_EXTRACT)
+    """PII-bearing vision calls (payment screenshots)."""
     return _build(settings.MODEL_PII_PROVIDER, settings.MODEL_PII)
 
 

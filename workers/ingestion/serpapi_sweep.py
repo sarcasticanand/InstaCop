@@ -39,7 +39,7 @@ def run() -> int:
     if not settings.SERPAPI_KEY:
         raise SystemExit("SERPAPI_KEY not set")
     total = 0
-    client = httpx.Client(timeout=20, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0 (TrustKaroBot)"})
+    client = httpx.Client(timeout=20, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0 (InstaCopBot)"})
     for query in QUERIES:
         try:
             resp = client.get(
