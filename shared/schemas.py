@@ -42,6 +42,8 @@ class IGProfile(BaseModel):
     following_count: int | None = None
     post_count: int | None = None
     is_private: bool = False
+    is_business_account: bool | None = None
+    business_category: str | None = None
     comments_disabled: bool = False
     oldest_post_at: datetime | None = None
     account_created_at: datetime | None = None

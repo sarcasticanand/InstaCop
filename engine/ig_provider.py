@@ -252,11 +252,28 @@ class InstaloaderIGProvider(IGProvider):
         try:
             ig_profile = instaloader.Profile.from_username(self._L.context, handle)
         except instaloader.ProfileNotExistsException:
+            # Anonymous requests from datacenter IPs get stonewalled by
+            # Instagram, and instaloader reports the block as "not found".
+            # Only trust the 404 when we're authenticated.
+            if not settings.IG_SESSION_ID:
+                logger.warning(
+                    "Instaloader: @%s reported as not-found on an anonymous request — "
+                    "likely an IG block, not a real 404. Set IG_SESSION_ID.", handle,
+                )
+                raise IGProviderError(
+                    "Instagram is limiting our access right now, or the handle doesn't exist. Try again in a few minutes"
+                )
             raise IGProviderError(f"Instagram profile @{handle} does not exist")
+        except instaloader.LoginRequiredException:
+            logger.warning("Instaloader: login required for @%s — set IG_SESSION_ID", handle)
+            raise IGProviderError("Instagram is limiting our access right now. Try again in a few minutes")
         except instaloader.ConnectionException as exc:
             raise IGProviderError(f"Instagram connection error for @{handle}: {exc}")
         except Exception as exc:
             raise IGProviderError(f"Failed to fetch @{handle}: {exc}")
+
+        is_business = getattr(ig_profile, "is_business_account", None)
+        business_category = getattr(ig_profile, "business_category_name", None)
 
         if ig_profile.is_private:
             return IGProfile(
@@ -269,6 +286,8 @@ class InstaloaderIGProvider(IGProvider):
                 following_count=ig_profile.followees,
                 post_count=ig_profile.mediacount,
                 is_private=True,
+                is_business_account=is_business,
+                business_category=business_category,
                 source="instaloader",
                 raw={},
             ), 0.0
@@ -319,6 +338,8 @@ class InstaloaderIGProvider(IGProvider):
             following_count=ig_profile.followees,
             post_count=ig_profile.mediacount,
             is_private=False,
+            is_business_account=is_business,
+            business_category=business_category,
             comments_disabled=comments_disabled,
             oldest_post_at=oldest_post_at,
             recent_posts=recent_posts,

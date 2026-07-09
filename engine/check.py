@@ -68,6 +68,12 @@ def run_check(handle: str, on_profile=None, requested_by: str = "cli") -> RiskCa
             raise SystemExit(f"Could not fetch @{handle}: {exc}")
         ledger.add("ig_provider.fetch_profile", fetch_cost)
 
+        if profile.is_private:
+            raise SystemExit(
+                "that account is private, so its posts and activity are hidden. "
+                "Legit shops almost always keep a public profile — treat a private 'seller' as a red flag"
+            )
+
         if on_profile is not None:
             try:
                 on_profile(profile)
