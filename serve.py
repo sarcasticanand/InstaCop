@@ -9,6 +9,8 @@ Usage: python serve.py
 
 import logging
 import os
+import subprocess
+import sys
 import threading
 import time
 
@@ -16,16 +18,27 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+def _fix_database_url():
+    """Supabase gives postgresql:// URLs which trigger psycopg2. We use psycopg
+    (v3) which needs postgresql+psycopg:// scheme."""
+    url = os.environ.get("DATABASE_URL", "")
+    if url.startswith("postgresql://") and "+psycopg" not in url:
+        os.environ["DATABASE_URL"] = url.replace("postgresql://", "postgresql+psycopg://", 1)
+
+
 def run_worker():
-    """RQ worker loop in a background thread."""
+    """RQ worker loop in a background thread using SimpleWorker with
+    signal handling disabled (signals only work in main thread)."""
     import redis
-    from rq import SimpleWorker, Queue
+    from rq import Queue, SimpleWorker
     from shared.config import settings
 
     logger.info("worker thread started")
     conn = redis.from_url(settings.REDIS_URL)
     queues = [Queue("checks", connection=conn)]
     worker = SimpleWorker(queues, connection=conn)
+    # Disable signal handlers since we're in a thread
+    worker._install_signal_handlers = lambda: None
     worker.work()
 
 
@@ -73,9 +86,16 @@ def run_api():
 
 
 if __name__ == "__main__":
-    # Run migrations first
+    _fix_database_url()
+
+    # Run migrations (from the api/ directory where alembic.ini lives)
     logger.info("running database migrations...")
-    os.system("alembic --config api/alembic.ini upgrade head")
+    result = subprocess.run(
+        [sys.executable, "-m", "alembic", "--config", "api/alembic.ini", "upgrade", "head"],
+        cwd=os.path.dirname(os.path.abspath(__file__)),
+    )
+    if result.returncode != 0:
+        logger.error("migration failed with code %d", result.returncode)
 
     # Start worker and scheduler as daemon threads
     worker_thread = threading.Thread(target=run_worker, daemon=True)
