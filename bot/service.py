@@ -83,12 +83,21 @@ def allow_global_cold_check() -> bool:
     return _bump_daily(f"rl:global:cold:{date.today().isoformat()}", settings.MAX_COLD_CHECKS_PER_DAY)
 
 
-def enqueue_cold_check(handle: str, chat_id: str | None, schedule_followup: bool) -> bool:
+def refund_cold_check(user_id: int | str) -> None:
+    """Give back one cold-check credit when a check fails through no fault of
+    the user (bad handle, IG block, crash) — failed checks must not count."""
+    r = get_redis()
+    key = f"rl:cold:{user_id}"
+    if int(r.get(key) or 0) > 0:
+        r.decr(key)
+
+
+def enqueue_cold_check(handle: str, chat_id: str | None, schedule_followup: bool, user_id: int | None = None) -> bool:
     """The one gate every cold-check enqueue must pass. Returns False if the
     global daily cap is hit."""
     if not allow_global_cold_check():
         return False
-    get_queue().enqueue("workers.jobs.cold_check_job", handle, chat_id, schedule_followup, job_timeout=600)
+    get_queue().enqueue("workers.jobs.cold_check_job", handle, chat_id, schedule_followup, user_id, job_timeout=600)
     return True
 
 
@@ -124,7 +133,7 @@ def start_check(handle: str, chat_id: str, user_id: int) -> CheckOutcome:
 
         if not allow_cold_check(user_id):
             return CheckOutcome(kind="rate_limited_cold")
-        if not enqueue_cold_check(handle, chat_id, True):
+        if not enqueue_cold_check(handle, chat_id, True, user_id=user_id):
             return CheckOutcome(kind="global_capped")
         return CheckOutcome(kind="queued")
     finally:

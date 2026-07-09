@@ -47,11 +47,24 @@ def _early_signal_text(profile) -> str | None:
     return None
 
 
-def cold_check_job(handle: str, chat_id: str | None = None, schedule_followup: bool = True) -> int | None:
+def cold_check_job(
+    handle: str, chat_id: str | None = None, schedule_followup: bool = True, user_id: int | None = None
+) -> int | None:
     """Full risk check; records the check row, schedules the follow-up, and
     (if chat_id given) sends the finished card back to the requester.
     Returns the check id."""
     db = SessionLocal()
+
+    def refund_quota():
+        # failed checks must not count against the requester's daily limit
+        if user_id is None:
+            return
+        try:
+            from bot.service import refund_cold_check
+
+            refund_cold_check(user_id)
+        except Exception as exc:
+            logger.warning("rate-limit refund failed for user %s: %s", user_id, exc)
 
     def on_profile(profile):
         if chat_id:
@@ -77,9 +90,13 @@ def cold_check_job(handle: str, chat_id: str | None = None, schedule_followup: b
         return card.check_id
     except SystemExit as exc:
         # engine raises SystemExit on unfetchable profiles; report kindly
+        refund_quota()
         if chat_id:
             send_telegram(chat_id, f"Couldn't check @{handle} — {exc}. Is the handle correct and public?")
         return None
+    except Exception:
+        refund_quota()
+        raise
     finally:
         db.close()
 
