@@ -93,8 +93,11 @@ def _subreddit_from_url(url: str) -> str | None:
     return m.group(1) if m else None
 
 
-def _fetch_via_serpapi(db: Session, seller: Seller) -> tuple[int, float]:
-    inserted, cost = 0, 0.0
+def _fetch_via_serpapi(db: Session, seller: Seller) -> tuple[int, float, bool]:
+    """Returns (inserted, cost_inr, ok). ok=False means no query succeeded —
+    the caller must NOT stamp freshness, or a transient failure (or missing
+    key) silences reddit data for BRAND_REVIEW_STALENESS_DAYS."""
+    inserted, cost, ok = 0, 0.0, False
     client = httpx.Client(timeout=20, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0 (InstaCopBot)"})
     for query in _queries_for(seller.ig_handle):
         try:
@@ -105,6 +108,7 @@ def _fetch_via_serpapi(db: Session, seller: Seller) -> tuple[int, float]:
             resp.raise_for_status()
             cost += SERPAPI_COST_INR
             results = resp.json().get("organic_results", []) or []
+            ok = True
         except Exception as exc:
             logger.warning("reddit brand query failed (%s): %s", query, exc)
             continue
@@ -118,7 +122,7 @@ def _fetch_via_serpapi(db: Session, seller: Seller) -> tuple[int, float]:
             # blocked by reddit; snippet + title is what we compliantly get on this path)
             if _upsert_review(db, seller.id, link, text, _subreddit_from_url(link)):
                 inserted += 1
-    return inserted, cost
+    return inserted, cost, ok
 
 
 def _fetch_via_praw(db: Session, seller: Seller) -> tuple[int, float]:
@@ -165,11 +169,16 @@ def ensure_brand_reviews(db: Session, seller: Seller, budget_ok: bool = True) ->
         try:
             if settings.REDDIT_API_ENABLED and settings.REDDIT_CLIENT_ID:
                 inserted, cost = _fetch_via_praw(db, seller)
+                ok = True
+            elif settings.SERPAPI_KEY:
+                inserted, cost, ok = _fetch_via_serpapi(db, seller)
             else:
-                inserted, cost = _fetch_via_serpapi(db, seller)
-            _bump_freshness(db, seller.id)
-            db.commit()
-            logger.info("reddit brand fetch for %s: %d new reviews", seller.ig_handle, inserted)
+                inserted, ok = 0, False
+                logger.warning("reddit: skipped for %s — SERPAPI_KEY not set", seller.ig_handle)
+            if ok:  # freshness only on success, else next check retries
+                _bump_freshness(db, seller.id)
+                db.commit()
+                logger.info("reddit brand fetch for %s: %d new reviews", seller.ig_handle, inserted)
         except Exception as exc:
             db.rollback()  # never poison the caller's session mid-check
             logger.warning("reddit brand fetch failed for %s: %s", seller.ig_handle, exc)

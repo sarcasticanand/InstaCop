@@ -190,8 +190,22 @@ async def cmd_fresh(message: Message):
     if handle is None:
         await message.answer("That doesn't look like an Instagram handle or link.")
         return
+
+    # /fresh means bypass ALL caches — including the brand-review freshness
+    # stamp, or a previously failed reddit fetch stays silenced for 30 days
+    from shared.models import BrandReviewFreshness
+
+    db = SessionLocal()
+    try:
+        seller = db.query(Seller).filter(Seller.ig_handle == handle).one_or_none()
+        if seller:
+            db.query(BrandReviewFreshness).filter_by(seller_id=seller.id).delete()
+            db.commit()
+    finally:
+        db.close()
+
     if service.enqueue_cold_check(handle, str(message.chat.id), False, user_id=message.from_user.id):
-        await message.answer(f"🔄 Fresh check queued for @{handle} (cache bypassed).")
+        await message.answer(f"🔄 Fresh check queued for @{handle} (all caches bypassed).")
     else:
         await message.answer("Global daily check cap reached.")
 
