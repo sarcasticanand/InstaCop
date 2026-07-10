@@ -29,6 +29,26 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/health/config")
+def health_config(probe_admin_id: str = ""):
+    """Deploy diagnostics: which commit is live and whether key env vars
+    loaded. Booleans and counts only — never echoes secret values."""
+    import os
+
+    from bot.service import _is_admin
+
+    out = {
+        "git_commit": (os.environ.get("RENDER_GIT_COMMIT") or "unknown")[:8],
+        "ig_provider": settings.IG_PROVIDER,
+        "ig_session_set": bool(settings.IG_SESSION_ID),
+        "admin_ids_configured": len([x for x in settings.ADMIN_USER_IDS.split(",") if x.strip()]),
+        "webhook_url_set": bool(settings.WEBHOOK_URL),
+    }
+    if probe_admin_id:
+        out["probe_is_admin"] = _is_admin(probe_admin_id)
+    return out
+
+
 FOLLOWUP_LABELS = {
     "bought_good": "Bought — all good",
     "bought_late": "Bought — arrived late",
