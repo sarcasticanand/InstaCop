@@ -233,13 +233,46 @@ class InstaloaderIGProvider(IGProvider):
         )
         if settings.IG_SESSION_ID:
             try:
-                self._L.context._session.cookies.set(
-                    "sessionid", settings.IG_SESSION_ID,
-                    domain=".instagram.com", path="/", secure=True,
-                )
-                logger.info("Instaloader: using session cookie for authenticated access")
+                self._login_with_cookies()
             except Exception as exc:
                 logger.warning("Instaloader: session cookie setup failed: %s", exc)
+
+    def _login_with_cookies(self):
+        """Make instaloader treat IG_SESSION_ID as a real login. A bare
+        sessionid cookie unlocks profile metadata only; the posts/comments
+        GraphQL endpoints require the full logged-in context (csrftoken
+        header + username resolved), so build all of it here."""
+        from urllib.parse import unquote
+
+        session = self._L.context._session
+        sid = unquote(settings.IG_SESSION_ID)
+        session.cookies.set("sessionid", sid, domain=".instagram.com", path="/", secure=True)
+
+        # sessionid is "<user_id>:<token>:..." — derive ds_user_id from it
+        uid = sid.split(":")[0]
+        if uid.isdigit():
+            session.cookies.set("ds_user_id", uid, domain=".instagram.com", path="/", secure=True)
+
+        csrf = settings.IG_CSRF_TOKEN
+        if not csrf:
+            try:  # Instagram hands a csrftoken to any request; grab one
+                session.get("https://www.instagram.com/", timeout=15)
+                csrf = session.cookies.get("csrftoken")
+            except Exception as exc:
+                logger.warning("Instaloader: csrftoken bootstrap failed: %s", exc)
+        if csrf:
+            session.cookies.set("csrftoken", csrf, domain=".instagram.com", path="/", secure=True)
+            session.headers.update({"X-CSRFToken": csrf})
+
+        username = self._L.test_login()
+        if username:
+            self._L.context.username = username
+            logger.info("Instaloader: authenticated as @%s", username)
+        else:
+            logger.warning(
+                "Instaloader: session cookie present but login check failed — "
+                "cookie may be stale; re-copy sessionid (and csrftoken) from the browser"
+            )
 
     def _delay(self):
         time.sleep(self.INTER_REQUEST_DELAY)

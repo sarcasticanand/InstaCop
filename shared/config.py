@@ -67,10 +67,12 @@ class Settings(BaseSettings):
     # "instaloader" (free, local) or "apify" (paid, cloud). Instaloader is the
     # default — switch to apify when revenue justifies the $49/mo spend.
     IG_PROVIDER: str = "instaloader"
-    # Optional: Instagram session cookie for instaloader to avoid rate limits.
-    # Log in via browser, copy the sessionid cookie value. Leave empty for
-    # anonymous scraping (works for public profiles, lower rate limit).
+    # Instagram session cookies for instaloader. Anonymous scraping is now
+    # fully blocked by Instagram (403), so IG_SESSION_ID is effectively
+    # required. Copy sessionid (and ideally csrftoken) from browser DevTools
+    # after logging in: Application > Cookies > instagram.com.
     IG_SESSION_ID: str = ""
+    IG_CSRF_TOKEN: str = ""  # optional; bootstrapped automatically when empty
 
     CORS_ORIGINS: str = "*"
 

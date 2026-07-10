@@ -176,6 +176,26 @@ async def _handle_check(message: Message, raw: str):
     await message.answer(text)
 
 
+# --- /fresh: admin-only cache bypass for testing --------------------------
+
+@router.message(Command("fresh"))
+async def cmd_fresh(message: Message):
+    if not service._is_admin(message.from_user.id):
+        return  # silently ignore for non-admins
+    args = (message.text or "").split(maxsplit=1)
+    if len(args) < 2:
+        await message.answer("Usage: /fresh <handle> — forces a fresh check, skipping the cache.")
+        return
+    handle = service.parse_handle(args[1])
+    if handle is None:
+        await message.answer("That doesn't look like an Instagram handle or link.")
+        return
+    if service.enqueue_cold_check(handle, str(message.chat.id), False, user_id=message.from_user.id):
+        await message.answer(f"🔄 Fresh check queued for @{handle} (cache bypassed).")
+    else:
+        await message.answer("Global daily check cap reached.")
+
+
 # --- /report flow -------------------------------------------------------
 
 @router.message(Command("report"))

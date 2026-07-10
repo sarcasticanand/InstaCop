@@ -27,6 +27,14 @@ services:
         sync: false
       - key: IG_PROVIDER
         value: instaloader
+      - key: IG_SESSION_ID
+        sync: false
+      - key: IG_CSRF_TOKEN
+        sync: false
+      - key: SERPAPI_KEY
+        sync: false
+      - key: ADMIN_USER_IDS
+        sync: false
       - key: FOLLOWUP_DELAY_MINUTES
         value: "17280"
       - key: CORS_ORIGINS
