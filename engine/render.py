@@ -48,26 +48,46 @@ def render_card(
     lines += [f"• {line}" for line in evidence_lines]
 
     if experience and experience.get("has_data"):
-        lines.append("⭐ What buyers report:")
-        shown = 0
-        for cat, level in exp_cats.items():
-            if level in ("recurring", "severe"):
-                badge, word = LEVEL_LABEL[level]
-                lines.append(f"{badge} {CATEGORY_LABEL.get(cat, cat.replace('_', ' ').title())}: {word}")
-                shown += 1
-        if not shown:
-            if any(level == "isolated" for level in exp_cats.values()):
-                lines.append("△ Only scattered one-off complaints — nothing looks systematic")
-            else:
-                lines.append("✓ No recurring complaints found in community reviews")
-        positive = experience.get("positive_signals") or 0
-        if positive:
-            lines.append(f"👍 {positive} buyer(s) reported a good experience")
-        if experience.get("summary"):
-            lines.append(f"“{experience['summary']}”")
+        lines += experience_lines(experience)
     else:
         lines.append("⭐ Community reviews: none found yet")
     return "\n".join(lines)
+
+
+def experience_lines(experience: dict) -> list[str]:
+    """Plain-language block for the community-review data; shared by the
+    final card and the early bot reply."""
+    exp_cats = experience.get("categories") or {}
+    lines = ["⭐ What buyers report:"]
+    shown = 0
+    for cat, level in exp_cats.items():
+        if level in ("recurring", "severe"):
+            badge, word = LEVEL_LABEL[level]
+            lines.append(f"{badge} {CATEGORY_LABEL.get(cat, cat.replace('_', ' ').title())}: {word}")
+            shown += 1
+    if not shown:
+        if any(level == "isolated" for level in exp_cats.values()):
+            lines.append("△ Only scattered one-off complaints — nothing looks systematic")
+        else:
+            lines.append("✓ No recurring complaints found in community reviews")
+    positive = experience.get("positive_signals") or 0
+    if positive:
+        lines.append(f"👍 {positive} buyer(s) reported a good experience")
+    if experience.get("summary"):
+        lines.append(f"“{experience['summary']}”")
+    for url in (experience.get("sources") or [])[:2]:
+        lines.append(f"🔗 {url}")
+    return lines
+
+
+def render_experience_early(handle: str, experience: dict | None) -> str | None:
+    """Fast first reply: community reviews only, sent while the slower
+    Instagram scan is still running. None = nothing worth sending."""
+    if not experience or not experience.get("has_data"):
+        return None
+    return "\n".join(
+        [f"@{handle} — community reviews (fraud scan still running):"] + experience_lines(experience)
+    )
 
 
 def render_from_snapshot(handle: str, snapshot) -> str:

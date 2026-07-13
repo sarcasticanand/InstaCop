@@ -49,18 +49,50 @@ def _get_or_create_seller(db, handle: str, ig_user_id: str | None) -> Seller:
     return seller
 
 
-def run_check(handle: str, on_profile=None, requested_by: str = "cli") -> RiskCard:
+def run_check(handle: str, on_profile=None, on_experience=None, requested_by: str = "cli") -> RiskCard:
     """Runs the full check AND records the checks row (every path must produce
     one: follow-ups, cost logging, and the outcome dataset depend on it).
 
-    on_profile: optional callback invoked with the IGProfile as soon as the
-    profile fetch lands — lets callers (the bot worker) push an early signal to
-    the user while the slower image/LLM signals still run."""
+    Order matters: community reviews (reddit) run FIRST because they're fast
+    and they're what the user actually asked — the slow Instagram scrape and
+    profile signals are the fallback/corroboration layer, not the headline.
+
+    on_experience: optional callback invoked with the experience dict as soon
+    as community data lands — lets the bot answer in seconds.
+    on_profile: optional callback invoked with the IGProfile when the fetch
+    lands — pushes the early account-age warning."""
     handle = handle.lower().lstrip("@")
     ledger = CostLedger()
     db = SessionLocal()
 
     try:
+        seller = _get_or_create_seller(db, handle, None)
+        db.commit()
+
+        # Phase 1 — what buyers already said (fast: search + LLM, no scraping)
+        experience = None
+        try:
+            from workers.ingestion.reddit_brand import ensure_brand_reviews
+
+            _reviews, reddit_cost = ensure_brand_reviews(db, seller, budget_ok=not ledger.over_cap())
+            ledger.add("reddit_brand_cache", reddit_cost)
+
+            from engine.experience import experience_for_seller
+
+            experience, exp_cost = experience_for_seller(db, seller.id)
+            ledger.add("experience_profile", exp_cost)
+        except Exception as exc:
+            import logging
+
+            logging.getLogger(__name__).warning("experience pipeline failed for %s: %s", handle, exc)
+
+        if on_experience is not None and experience and experience.get("has_data"):
+            try:
+                on_experience(experience)
+            except Exception:
+                pass
+
+        # Phase 2 — Instagram profile + the 9 fraud-pattern signals
         provider = get_provider()
         try:
             profile, fetch_cost = provider.fetch_profile(handle)
@@ -80,8 +112,9 @@ def run_check(handle: str, on_profile=None, requested_by: str = "cli") -> RiskCa
             except Exception:
                 pass
 
-        seller = _get_or_create_seller(db, handle, profile.ig_user_id)
-        db.commit()
+        if profile.ig_user_id and not seller.ig_user_id:
+            seller.ig_user_id = profile.ig_user_id
+            db.commit()
 
         signals: list[SignalResult] = []
         for module in PROFILE_SIGNALS:
@@ -96,24 +129,6 @@ def run_check(handle: str, on_profile=None, requested_by: str = "cli") -> RiskCa
             result, cost = module.compute(seller.id, db)
             ledger.add(module.__name__, cost)
             signals.append(result)
-
-        # Workstream A: read-first brand-review cache (refreshes only if stale
-        # and budget allows). Workstream B: graded experience profile on top.
-        experience = None
-        try:
-            from workers.ingestion.reddit_brand import ensure_brand_reviews
-
-            _reviews, reddit_cost = ensure_brand_reviews(db, seller, budget_ok=not ledger.over_cap())
-            ledger.add("reddit_brand_cache", reddit_cost)
-
-            from engine.experience import experience_for_seller
-
-            experience, exp_cost = experience_for_seller(db, seller.id)
-            ledger.add("experience_profile", exp_cost)
-        except Exception as exc:
-            import logging
-
-            logging.getLogger(__name__).warning("experience pipeline failed for %s: %s", handle, exc)
 
         patterns_matched, patterns_total, weighted_score, risk_band = compute_band(signals)
 

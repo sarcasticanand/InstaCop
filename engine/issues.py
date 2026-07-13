@@ -40,12 +40,22 @@ def _parse(text: str) -> dict:
         return {}
 
 
-def classify_text(text: str) -> tuple[dict, str, float]:
-    """Returns (issue_categories dict 0..1 per category, sentiment, cost_inr)."""
+def classify_text(text: str, brand: str | None = None) -> tuple[dict, str, float]:
+    """Returns (issue_categories dict 0..1 per category, sentiment, cost_inr).
+    brand: when given, only issues attributed to THAT seller are scored."""
     if not (text or "").strip():
         return {c: 0.0 for c in CATEGORIES}, "neutral", 0.0
+    system = CLASSIFY_SYSTEM
+    if brand:
+        system += (
+            f"\nIMPORTANT: the seller being scored is '{brand}'. Score ONLY issues the writer "
+            f"attributes to this specific seller based on described buyer experience. Complaints "
+            f"about OTHER brands/sellers appearing in the same text score zero. A bare question "
+            f"('is {brand} legit?') or hearsay with no experience described scores zero. "
+            f"'Overpriced' alone is NOT a quality issue."
+        )
     llm = get_extract_llm()
-    raw, cost = llm.complete(CLASSIFY_SYSTEM, text[:4000], max_tokens=300, json_mode=True)
+    raw, cost = llm.complete(system, text[:8000], max_tokens=300, json_mode=True)
     data = _parse(raw)
     categories = {}
     for c in CATEGORIES:
@@ -62,7 +72,10 @@ def classify_brand_reviews(db, seller_id: int, limit: int = 25) -> float:
     Returns total LLM cost."""
     from datetime import datetime, timezone
 
-    from shared.models import BrandReview
+    from shared.models import BrandReview, Seller
+
+    seller = db.get(Seller, seller_id)
+    brand = seller.ig_handle if seller else None
 
     rows = (
         db.query(BrandReview)
@@ -73,7 +86,7 @@ def classify_brand_reviews(db, seller_id: int, limit: int = 25) -> float:
     total = 0.0
     for row in rows:
         try:
-            categories, sentiment, cost = classify_text(row.raw_text)
+            categories, sentiment, cost = classify_text(row.raw_text, brand=brand)
         except Exception as exc:
             logger.warning("classification failed for brand_review %s: %s", row.id, exc)
             continue

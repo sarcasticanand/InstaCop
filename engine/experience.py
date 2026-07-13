@@ -110,7 +110,9 @@ def _level_for(weighted_sum: float, contributor_count: int) -> str:
         return "none"
     if weighted_sum < 1.2 or contributor_count == 1:
         return "isolated"
-    if weighted_sum < 3.0:
+    # "severe" is a public accusation — it needs 3+ independent reports,
+    # not just a high weighted score from one or two loud threads
+    if weighted_sum < 3.0 or contributor_count < 3:
         return "recurring"
     return "severe"
 
@@ -187,10 +189,23 @@ def experience_for_seller(db: Session, seller_id: int) -> tuple[dict, float]:
     profile = build_experience_profile(db, seller_id)
     notes = [i["note"] for i in _collect_evidence(db, seller_id) if i.get("note")]
     summary, synth_cost = synthesize_findings_summary(profile, notes)
+
+    # Receipts: the threads that carried actual issue signal, so the card can
+    # link to them — every graded claim must be checkable by the reader.
+    sources = [
+        r.source_url
+        for r in db.query(BrandReview)
+        .filter(BrandReview.seller_id == seller_id, BrandReview.source_url.isnot(None))
+        .order_by(BrandReview.fetched_at.desc())
+        .limit(10)
+        if r.issue_categories and any((v or 0) >= 0.3 for v in r.issue_categories.values())
+    ][:3]
+
     return {
         "categories": {c: v["level"] for c, v in profile["categories"].items()},
         "detail": profile["categories"],
         "has_data": profile["has_data"],
         "positive_signals": profile["positive_signals"],
         "summary": summary,
+        "sources": sources,
     }, cost + synth_cost

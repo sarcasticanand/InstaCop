@@ -4,14 +4,19 @@ On a check: read brand_reviews first; if fresh (< BRAND_REVIEW_STALENESS_DAYS)
 serve stored rows; else fetch, upsert, bump freshness, serve. Fully automated —
 no manual step anywhere.
 
-Access paths, in priority order (both compliant):
-  1. SerpAPI Google queries scoped to reddit.com (works today)
+Access paths, in priority order:
+  1. SerpAPI Google queries scoped to reddit.com to DISCOVER threads, then the
+     thread's public .json endpoint to read the actual post + top comments —
+     classifying Google's 120-char snippets produced grades the underlying
+     reviews didn't support, which is worse than no grade at all.
   2. PRAW via REDDIT_* creds — behind REDDIT_API_ENABLED, activates without a
      rewrite if/when Reddit approves the operator's Data API application.
-Direct reddit.com HTML scraping is deliberately NOT implemented (ToS + brittle).
+HTML scraping is deliberately NOT implemented (brittle); if the .json fetch
+fails we fall back to the search snippet rather than fabricate content.
 """
 
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -28,6 +33,8 @@ logger = logging.getLogger(__name__)
 SUBREDDITS_FILE = Path(__file__).resolve().parent.parent.parent / "config" / "subreddits.txt"
 SERPAPI_COST_INR = 0.015 * 83.0
 RESULTS_PER_QUERY = 8
+MAX_THREADS_PER_BRAND = 6  # full-content fetches per brand per refresh
+COMMENTS_PER_THREAD = 12
 
 
 def load_subreddits() -> list[str]:
@@ -70,8 +77,16 @@ def _queries_for(handle: str) -> list[str]:
 
 def _upsert_review(db: Session, seller_id: int, source_url: str | None, text: str, subreddit: str | None) -> bool:
     if source_url:
-        exists = db.query(BrandReview.id).filter_by(seller_id=seller_id, source_url=source_url).first()
-        if exists:
+        existing = db.query(BrandReview).filter_by(seller_id=seller_id, source_url=source_url).one_or_none()
+        if existing:
+            # Richer content for a known thread (full text where we only had a
+            # search snippet) replaces it and forces re-classification.
+            if len(text) > len(existing.raw_text or "") + 100:
+                existing.raw_text = text[:12000]
+                existing.issue_categories = None
+                existing.sentiment = None
+                existing.extracted_at = None
+                db.flush()
             return False
     db.add(
         BrandReview(
@@ -93,12 +108,57 @@ def _subreddit_from_url(url: str) -> str | None:
     return m.group(1) if m else None
 
 
+def _reddit_client():
+    """Read-only PRAW client from REDDIT_* creds; None when unconfigured.
+    (Anonymous reddit .json access is fully blocked as of 2025 — full thread
+    content requires these free script-app credentials.)"""
+    if not (settings.REDDIT_CLIENT_ID and settings.REDDIT_CLIENT_SECRET):
+        return None
+    try:
+        import praw
+
+        return praw.Reddit(
+            client_id=settings.REDDIT_CLIENT_ID,
+            client_secret=settings.REDDIT_CLIENT_SECRET,
+            user_agent=settings.REDDIT_USER_AGENT,
+        )
+    except Exception as exc:
+        logger.warning("praw client init failed: %s", exc)
+        return None
+
+
+def _fetch_thread_text(reddit, url: str) -> str | None:
+    """Read the actual thread (post + top comments) via the Reddit API.
+    Returns None on failure — caller falls back to the search snippet."""
+    if reddit is None:
+        return None
+    try:
+        sub = reddit.submission(url=url)
+        parts = [f"[{sub.title}]", sub.selftext or ""]
+        sub.comments.replace_more(limit=0)
+        comments = [c.body for c in sub.comments[:COMMENTS_PER_THREAD] if getattr(c, "body", None)]
+        if comments:
+            parts.append("--- comments ---")
+            parts.extend(comments)
+        text = "\n".join(p for p in parts if p)
+        return text if len(text) > 40 else None
+    except Exception as exc:
+        logger.info("reddit thread fetch failed (%s): %s", url, exc)
+        return None
+
+
 def _fetch_via_serpapi(db: Session, seller: Seller) -> tuple[int, float, bool]:
-    """Returns (inserted, cost_inr, ok). ok=False means no query succeeded —
+    """Discover threads via SerpAPI, then read each thread's real content.
+    Returns (inserted, cost_inr, ok). ok=False means no query succeeded —
     the caller must NOT stamp freshness, or a transient failure (or missing
     key) silences reddit data for BRAND_REVIEW_STALENESS_DAYS."""
     inserted, cost, ok = 0, 0.0, False
-    client = httpx.Client(timeout=20, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0 (InstaCopBot)"})
+    client = httpx.Client(
+        timeout=20, follow_redirects=True,
+        headers={"User-Agent": "web:instacop:v0.1 (seller risk research)"},
+    )
+
+    candidates: dict[str, str] = {}  # link -> snippet fallback text, deduped
     for query in _queries_for(seller.ig_handle):
         try:
             resp = client.get(
@@ -112,16 +172,19 @@ def _fetch_via_serpapi(db: Session, seller: Seller) -> tuple[int, float, bool]:
         except Exception as exc:
             logger.warning("reddit brand query failed (%s): %s", query, exc)
             continue
-
         for r in results:
-            link = r.get("link") or ""
-            if "reddit.com" not in link:
+            link = (r.get("link") or "").split("?")[0]
+            if "reddit.com" not in link or "/comments/" not in link:
                 continue
-            text = f"{r.get('title', '')}\n{r.get('snippet', '')}"
-            # pull thread text where possible (google cache of thread body via page fetch is
-            # blocked by reddit; snippet + title is what we compliantly get on this path)
-            if _upsert_review(db, seller.id, link, text, _subreddit_from_url(link)):
-                inserted += 1
+            candidates.setdefault(link, f"{r.get('title', '')}\n{r.get('snippet', '')}")
+
+    reddit = _reddit_client()
+    for i, (link, snippet) in enumerate(list(candidates.items())[:MAX_THREADS_PER_BRAND]):
+        if i and reddit is not None:
+            time.sleep(0.5)  # stay well under API rate limits
+        text = _fetch_thread_text(reddit, link) or snippet
+        if _upsert_review(db, seller.id, link, text, _subreddit_from_url(link)):
+            inserted += 1
     return inserted, cost, ok
 
 

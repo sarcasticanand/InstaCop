@@ -72,8 +72,21 @@ def cold_check_job(
             if text:
                 send_telegram(chat_id, text)
 
+    sent_experience = {"done": False}
+
+    def on_experience(experience):
+        # community reviews land in seconds — send them without waiting for
+        # the slow Instagram scan
+        if chat_id:
+            from engine.render import render_experience_early
+
+            text = render_experience_early(handle, experience)
+            if text:
+                send_telegram(chat_id, text)
+                sent_experience["done"] = True
+
     try:
-        card = run_check(handle, on_profile=on_profile, requested_by=chat_id or "system")
+        card = run_check(handle, on_profile=on_profile, on_experience=on_experience, requested_by=chat_id or "system")
 
         if schedule_followup and chat_id and card.check_id:
             db.add(
@@ -92,7 +105,14 @@ def cold_check_job(
         # engine raises SystemExit on unfetchable profiles; report kindly
         refund_quota()
         if chat_id:
-            send_telegram(chat_id, f"Couldn't check @{handle} — {exc}. Is the handle correct and public?")
+            if sent_experience["done"]:
+                send_telegram(
+                    chat_id,
+                    f"⚠️ Couldn't complete the Instagram profile scan for @{handle} — {exc}. "
+                    "The community reviews above still stand.",
+                )
+            else:
+                send_telegram(chat_id, f"Couldn't check @{handle} — {exc}. Is the handle correct and public?")
         return None
     except Exception:
         refund_quota()
