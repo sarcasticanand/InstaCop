@@ -121,6 +121,13 @@ def cold_check_job(
         db.close()
 
 
+def reddit_sweep_job(subreddit: str, since_days: int = 365) -> dict:
+    """Bulk-harvest one subreddit from Arctic Shift into brand_reviews."""
+    from workers.ingestion.reddit_backfill import sweep_subreddit
+
+    return sweep_subreddit(subreddit, since_days=since_days)
+
+
 def recheck_stale_public_pages(max_rechecks: int = 20) -> int:
     """E2 staleness rule: a public High/Caution page older than 30 days gets a
     fresh check (band updates if the seller cleaned up). Respects the global

@@ -48,6 +48,26 @@ def run_worker():
     worker.work()
 
 
+def _maybe_monthly_sweep():
+    """Once a month, harvest new posts from the configured subreddits so the
+    brand database keeps growing without anyone asking. Last-run marker lives
+    in Redis (survives restarts)."""
+    import redis
+    from shared.config import settings
+
+    r = redis.from_url(settings.REDIS_URL)
+    last = float(r.get("sweep:last_run") or 0)
+    if time.time() - last < 30 * 86400:
+        return
+    from bot.service import get_queue
+    from workers.ingestion.reddit_brand import load_subreddits
+
+    for sub in load_subreddits():
+        get_queue().enqueue("workers.jobs.reddit_sweep_job", sub, 45, job_timeout=1800)
+    r.set("sweep:last_run", time.time())
+    logger.info("monthly reddit sweep queued for %d subreddits", len(load_subreddits()))
+
+
 def run_scheduler():
     """Scheduler loop in a background thread."""
     from workers.jobs import recheck_stale_public_pages, send_due_followups
@@ -67,6 +87,10 @@ def run_scheduler():
                 recheck_stale_public_pages()
             except Exception as exc:
                 logger.error("staleness pass failed: %s", exc)
+            try:
+                _maybe_monthly_sweep()
+            except Exception as exc:
+                logger.error("monthly sweep check failed: %s", exc)
             try:
                 from engine.operator_graph import autopopulate_from_payment_identities
                 from shared.db import SessionLocal

@@ -210,6 +210,26 @@ async def cmd_fresh(message: Message):
         await message.answer("Global daily check cap reached.")
 
 
+# --- /sweep: admin-only bulk reddit harvest -------------------------------
+
+@router.message(Command("sweep"))
+async def cmd_sweep(message: Message):
+    if not service._is_admin(message.from_user.id):
+        return
+    args = (message.text or "").split()
+    since_days = int(args[1]) if len(args) > 1 and args[1].isdigit() else 365
+    from workers.ingestion.reddit_brand import load_subreddits
+
+    subs = load_subreddits()
+    queue = service.get_queue()
+    for sub in subs:
+        queue.enqueue("workers.jobs.reddit_sweep_job", sub, since_days, job_timeout=1800)
+    await message.answer(
+        f"🧹 Queued sweeps for {len(subs)} subreddits (last {since_days} days). "
+        "They run one by one — watch the logs; brands land in the DB as they're found."
+    )
+
+
 # --- /report flow -------------------------------------------------------
 
 @router.message(Command("report"))
