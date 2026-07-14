@@ -1,19 +1,25 @@
 # One subreddit per line (no r/ prefix needed, but tolerated). The Reddit
-# brand-review fetcher iterates this file — add niches without a code change.
-india
-IndiaSocial
-onlineshopping
+# brand-review fetcher and the bulk sweep iterate this file — add niches
+# without a code change. Every entry verified active via Arctic Shift.
+
+# --- West (primary paying market) ---
+Scams
+Instagramreality
+femalefashionadvice
+malefashionadvice
+FrugalFemaleFashion
+Depop
+Etsy
+vinted
+AusFemaleFashion
+Aliexpress
+scamwatch
+
+# --- India (existing data moat, keep growing) ---
 InstaCelebsGossip
-IndianMakeupAddicts
 IndianFashionAddicts
+IndianMakeupAddicts
 IndianSkincareAddicts
 DesiFashion
-delhi
-mumbai
-bangalore
-kolkata
-pune
-hyderabad
-Chandigarh
-ABCDesis
 instaindia
+onlineshopping
