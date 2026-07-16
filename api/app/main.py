@@ -41,11 +41,38 @@ def health_config(probe_admin_id: str = ""):
         "git_commit": (os.environ.get("RENDER_GIT_COMMIT") or "unknown")[:8],
         "ig_provider": settings.IG_PROVIDER,
         "ig_session_set": bool(settings.IG_SESSION_ID),
+        "hikerapi_token_set": bool(settings.HIKERAPI_TOKEN),
         "admin_ids_configured": len([x for x in settings.ADMIN_USER_IDS.split(",") if x.strip()]),
         "webhook_url_set": bool(settings.WEBHOOK_URL),
     }
     if probe_admin_id:
         out["probe_is_admin"] = _is_admin(probe_admin_id)
+    return out
+
+
+@app.get("/health/data")
+def health_data(db: Session = Depends(get_db)):
+    """Data-pipeline diagnostics: is the sweep/ingestion actually landing rows?
+    Counts only — no content leaves this endpoint."""
+    import redis
+
+    from shared.models import BrandReview
+
+    out = {
+        "sellers": db.query(func.count(Seller.id)).scalar(),
+        "brand_reviews": db.query(func.count(BrandReview.id)).scalar(),
+        "checks": db.query(func.count(Check.id)).scalar(),
+        "reports": db.query(func.count(Report.id)).scalar(),
+    }
+    try:
+        r = redis.from_url(settings.REDIS_URL)
+        out["queued_jobs"] = r.llen("rq:queue:checks")
+        last = r.get("sweep:last_run")
+        out["last_monthly_sweep"] = (
+            datetime.fromtimestamp(float(last), tz=timezone.utc).isoformat() if last else None
+        )
+    except Exception:
+        out["queued_jobs"] = None
     return out
 
 

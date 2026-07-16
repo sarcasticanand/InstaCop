@@ -26,7 +26,9 @@ services:
       - key: WEBHOOK_SECRET
         sync: false
       - key: IG_PROVIDER
-        value: instaloader
+        value: hikerapi
+      - key: HIKERAPI_TOKEN
+        sync: false
       - key: IG_SESSION_ID
         sync: false
       - key: IG_CSRF_TOKEN

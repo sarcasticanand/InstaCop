@@ -439,6 +439,184 @@ class InstaloaderIGProvider(IGProvider):
         return tagged_posts, tagged_comments
 
 
+class HikerAPIIGProvider(IGProvider):
+    """Paid SaaS scraper (hikerapi.com, by the instagrapi authors). No login
+    account of ours to ban — they manage the account pool. ~$0.001/request,
+    so a full check (profile + posts + comments + tagged) runs ₹0.7-1.
+    Auth: x-access-key header, token from dashboard.hikerapi.com."""
+
+    BASE = "https://api.hikerapi.com"
+    MAX_POSTS = 12
+    MAX_TAGGED = 8
+    COMMENT_POSTS_PER_RUN = 3
+    COMMENTS_PER_POST = 10
+    COST_PER_REQUEST_INR = 0.001 * USD_TO_INR
+
+    def __init__(self, token: str | None = None):
+        import httpx
+
+        key = token or settings.HIKERAPI_TOKEN
+        if not key:
+            raise IGProviderError("HIKERAPI_TOKEN is not set")
+        self._client = httpx.Client(
+            base_url=self.BASE,
+            headers={"x-access-key": key, "accept": "application/json"},
+            timeout=60,
+        )
+        self._requests = 0
+
+    def _get(self, path: str, **params):
+        self._requests += 1
+        resp = self._client.get(path, params=params)
+        if resp.status_code == 404:
+            return None
+        if resp.status_code in (401, 402, 403):
+            raise IGProviderError(
+                f"HikerAPI rejected the request ({resp.status_code}) — check the token and account balance"
+            )
+        resp.raise_for_status()
+        return resp.json()
+
+    def fetch_profile(self, handle: str) -> tuple[IGProfile, float]:
+        handle = handle.lower().lstrip("@")
+
+        user = self._get("/v1/user/by/username", username=handle)
+        if not user or not isinstance(user, dict) or not (user.get("pk") or user.get("id")):
+            raise IGProviderError(f"Instagram profile @{handle} does not exist")
+
+        user_id = str(user.get("pk") or user.get("id"))
+        is_business = user.get("is_business")
+        business_category = user.get("category") or user.get("category_name")
+
+        base_kwargs = dict(
+            handle=handle,
+            ig_user_id=user_id,
+            display_name=user.get("full_name"),
+            bio_text=user.get("biography"),
+            bio_website_url=user.get("external_url"),
+            follower_count=user.get("follower_count"),
+            following_count=user.get("following_count"),
+            post_count=user.get("media_count"),
+            is_business_account=is_business,
+            business_category=business_category,
+            source="hikerapi",
+            raw={},
+        )
+
+        if user.get("is_private"):
+            return IGProfile(is_private=True, **base_kwargs), self._cost()
+
+        medias = self._chunk_items(self._get("/v1/user/medias/chunk", user_id=user_id))[: self.MAX_POSTS]
+        recent_posts = [self._to_post(m) for m in medias]
+
+        comments = self._fetch_comments(medias)
+
+        tagged_posts: list[IGTag] = []
+        tagged_post_comments: list[IGComment] = []
+        try:
+            tagged_medias = self._chunk_items(self._get("/v1/user/tag/medias/chunk", user_id=user_id))
+            tagged_medias = tagged_medias[: self.MAX_TAGGED]
+            for m in tagged_medias:
+                tagged_posts.append(
+                    IGTag(
+                        post_id=str(m.get("pk") or m.get("id") or ""),
+                        tagger_username=(m.get("user") or {}).get("username"),
+                        posted_at=self._ts(m.get("taken_at")),
+                    )
+                )
+            tagged_post_comments = self._fetch_comments(tagged_medias)
+        except Exception as exc:
+            logger.warning("HikerAPI tagged-posts fetch failed for @%s, degrading gracefully: %s", handle, exc)
+
+        profile = IGProfile(
+            is_private=False,
+            comments_disabled=bool(recent_posts) and all((p.comment_count or 0) == 0 for p in recent_posts),
+            oldest_post_at=min((p.posted_at for p in recent_posts if p.posted_at), default=None),
+            recent_posts=recent_posts,
+            comments=comments,
+            tagged_posts=tagged_posts,
+            tagged_post_comments=tagged_post_comments,
+            **base_kwargs,
+        )
+        return profile, self._cost()
+
+    def _fetch_comments(self, medias: list[dict]) -> list[IGComment]:
+        """Comments from the most-commented posts, same policy as the other
+        providers (top COMMENT_POSTS_PER_RUN posts, COMMENTS_PER_POST each)."""
+        targets = [
+            m
+            for m in sorted(medias, key=lambda m: m.get("comment_count") or 0, reverse=True)
+            if (m.get("comment_count") or 0) > 0
+        ][: self.COMMENT_POSTS_PER_RUN]
+
+        comments: list[IGComment] = []
+        for m in targets:
+            media_id = m.get("id") or m.get("pk")
+            if not media_id:
+                continue
+            try:
+                items = self._chunk_items(self._get("/v1/media/comments/chunk", id=media_id))
+            except Exception as exc:
+                logger.warning("HikerAPI comment fetch failed for media %s: %s", media_id, exc)
+                continue
+            for c in items[: self.COMMENTS_PER_POST]:
+                if not c.get("text"):
+                    continue
+                comments.append(
+                    IGComment(
+                        post_id=str(m.get("pk") or media_id),
+                        author_username=(c.get("user") or {}).get("username"),
+                        text=c["text"],
+                        posted_at=self._ts(c.get("created_at_utc") or c.get("created_at")),
+                    )
+                )
+        return comments
+
+    def _to_post(self, m: dict) -> IGPost:
+        return IGPost(
+            id=str(m.get("pk") or m.get("id") or ""),
+            shortcode=m.get("code"),
+            image_url=m.get("thumbnail_url"),
+            caption=m.get("caption_text") or ((m.get("caption") or {}).get("text") if isinstance(m.get("caption"), dict) else None),
+            posted_at=self._ts(m.get("taken_at")),
+            like_count=m.get("like_count"),
+            comment_count=m.get("comment_count"),
+        )
+
+    @staticmethod
+    def _chunk_items(data) -> list[dict]:
+        """/chunk endpoints return [items, next_cursor]; tolerate the other
+        shapes HikerAPI uses (flat list, {"items": [...]}, {"response": ...})."""
+        if data is None:
+            return []
+        if isinstance(data, list):
+            if len(data) == 2 and isinstance(data[0], list):
+                return [x for x in data[0] if isinstance(x, dict)]
+            return [x for x in data if isinstance(x, dict)]
+        if isinstance(data, dict):
+            for key in ("items", "medias", "comments"):
+                if isinstance(data.get(key), list):
+                    return [x for x in data[key] if isinstance(x, dict)]
+            inner = data.get("response")
+            if isinstance(inner, dict) and isinstance(inner.get("items"), list):
+                return [x for x in inner["items"] if isinstance(x, dict)]
+        return []
+
+    @staticmethod
+    def _ts(ts) -> datetime | None:
+        if not ts:
+            return None
+        try:
+            if isinstance(ts, (int, float)):
+                return datetime.fromtimestamp(ts, tz=timezone.utc)
+            return datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+        except (ValueError, TypeError, OSError):
+            return None
+
+    def _cost(self) -> float:
+        return self._requests * self.COST_PER_REQUEST_INR
+
+
 class ScreenshotVisionIGProvider(IGProvider):
     """Fallback path when Apify is unavailable/blocked: user forwards a
     screenshot instead of a handle, a vision LLM reads what's on screen."""
@@ -489,4 +667,6 @@ class ScreenshotVisionIGProvider(IGProvider):
 def get_provider() -> IGProvider:
     if settings.IG_PROVIDER == "apify":
         return ApifyIGProvider()
+    if settings.IG_PROVIDER == "hikerapi":
+        return HikerAPIIGProvider()
     return InstaloaderIGProvider()

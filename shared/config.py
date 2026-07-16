@@ -64,9 +64,10 @@ class Settings(BaseSettings):
 
     # Comma-separated origins for CORS. In prod, set to your web domain,
     # e.g. "https://instacop.shop". Defaults to wildcard (dev only).
-    # "instaloader" (free, local) or "apify" (paid, cloud). Instaloader is the
-    # default — switch to apify when revenue justifies the $49/mo spend.
+    # "hikerapi" (paid, ~$0.001/request, reliable), "instaloader" (free but
+    # Instagram bans the login account) or "apify" (paid, credit-billed).
     IG_PROVIDER: str = "instaloader"
+    HIKERAPI_TOKEN: str = ""  # dashboard.hikerapi.com access key
     # Instagram session cookies for instaloader. Anonymous scraping is now
     # fully blocked by Instagram (403), so IG_SESSION_ID is effectively
     # required. Copy sessionid (and ideally csrftoken) from browser DevTools
