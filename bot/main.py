@@ -103,29 +103,6 @@ async def cmd_check(message: Message):
     await _handle_check(message, args[1])
 
 
-@router.message(F.text, F.chat.type == ChatType.PRIVATE)
-async def any_text(message: Message, state: FSMContext):
-    if await state.get_state() is not None:
-        return  # mid-/report flow; let FSM handlers take it
-    handle = service.parse_handle(message.text)
-    if handle is None:
-        await message.answer("Send an Instagram profile link or @handle to check it.")
-        return
-    await _handle_check(message, handle)
-
-
-@router.message(F.photo, F.chat.type == ChatType.PRIVATE)
-async def photo_check(message: Message, state: FSMContext):
-    if await state.get_state() is not None:
-        return
-    await message.answer("Reading the screenshot…")
-    handle = await _handle_from_screenshot(message)
-    if handle is None:
-        await message.answer("Couldn't read a handle from that screenshot — type the @handle instead.")
-        return
-    await _handle_check(message, handle)
-
-
 async def _handle_from_screenshot(message: Message) -> str | None:
     try:
         photo = message.photo[-1]
@@ -427,6 +404,37 @@ async def group_text(message: Message):
     cleaned = text.replace(f"@{me.username}", " ").removeprefix("/check").strip()
     if cleaned:
         await _handle_check(message, cleaned)
+
+
+# --- catch-all handlers (MUST be registered last) --------------------------
+# aiogram gives the message to the FIRST matching handler. These match any
+# private text/photo, so registering them before the command and FSM handlers
+# silently swallowed /sweep, /fresh, /report and the report-flow replies.
+
+@router.message(F.text, F.chat.type == ChatType.PRIVATE)
+async def any_text(message: Message, state: FSMContext):
+    if await state.get_state() is not None:
+        return  # mid-flow message for a state handler; never treat as a handle
+    if (message.text or "").startswith("/"):
+        await message.answer("Unknown command. Send an Instagram @handle or link to check a seller.")
+        return
+    handle = service.parse_handle(message.text)
+    if handle is None:
+        await message.answer("Send an Instagram profile link or @handle to check it.")
+        return
+    await _handle_check(message, handle)
+
+
+@router.message(F.photo, F.chat.type == ChatType.PRIVATE)
+async def photo_check(message: Message, state: FSMContext):
+    if await state.get_state() is not None:
+        return
+    await message.answer("Reading the screenshot…")
+    handle = await _handle_from_screenshot(message)
+    if handle is None:
+        await message.answer("Couldn't read a handle from that screenshot — type the @handle instead.")
+        return
+    await _handle_check(message, handle)
 
 
 # --- runner ----------------------------------------------------------------
