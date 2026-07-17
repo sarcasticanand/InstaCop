@@ -64,8 +64,10 @@ class Settings(BaseSettings):
 
     # Comma-separated origins for CORS. In prod, set to your web domain,
     # e.g. "https://instacop.shop". Defaults to wildcard (dev only).
-    # "hikerapi" (paid, ~$0.001/request, reliable), "instaloader" (free but
-    # Instagram bans the login account) or "apify" (paid, credit-billed).
+    # "meta" (free Business Discovery via the DM-bot token, HikerAPI only for
+    # comments/tags — cheapest, needs the Meta app), "hikerapi" (paid,
+    # ~$0.001/request, reliable), "instaloader" (free but Instagram bans the
+    # login account) or "apify" (paid, credit-billed).
     IG_PROVIDER: str = "instaloader"
     HIKERAPI_TOKEN: str = ""  # dashboard.hikerapi.com access key
     # Instagram session cookies for instaloader. Anonymous scraping is now

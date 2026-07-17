@@ -617,6 +617,139 @@ class HikerAPIIGProvider(IGProvider):
         return self._requests * self.COST_PER_REQUEST_INR
 
 
+class MetaFirstIGProvider(IGProvider):
+    """Official-first hybrid: Meta's Business Discovery API (free, uses the
+    same app/token as the DM bot) supplies profile + posts for any Instagram
+    professional account. HikerAPI is called ONLY for what Meta doesn't
+    expose — comment text and tagged posts — and as the full fallback when
+    the target isn't a professional account (personal accounts are invisible
+    to Business Discovery).
+
+    Degrades gracefully: if HikerAPI is unconfigured or out of balance, the
+    check still completes on the free Meta data (comment/tag signals report
+    as unavailable instead of failing the whole check)."""
+
+    BD_MEDIA_LIMIT = 12
+    _GRAPH_HOSTS = ("https://graph.instagram.com/v23.0", "https://graph.facebook.com/v23.0")
+
+    def __init__(self, token: str | None = None):
+        self._token = token or settings.IG_DM_ACCESS_TOKEN
+        if not self._token:
+            raise IGProviderError("IG_DM_ACCESS_TOKEN is not set (needed for Business Discovery)")
+        self._hiker: HikerAPIIGProvider | None = None
+
+    def _hiker_provider(self) -> "HikerAPIIGProvider":
+        if self._hiker is None:
+            self._hiker = HikerAPIIGProvider()
+        return self._hiker
+
+    def _business_discovery(self, handle: str) -> dict | None:
+        """None = BD can't see this account (personal, or doesn't exist)."""
+        import httpx
+
+        fields = (
+            f"business_discovery.username({handle})"
+            "{username,name,biography,website,followers_count,follows_count,"
+            f"media_count,media.limit({self.BD_MEDIA_LIMIT})"
+            "{id,caption,timestamp,like_count,comments_count,permalink}}"
+        )
+        last_err = None
+        for host in self._GRAPH_HOSTS:
+            try:
+                resp = httpx.get(
+                    f"{host}/me",
+                    params={"fields": fields, "access_token": self._token},
+                    timeout=30,
+                )
+                data = resp.json()
+            except Exception as exc:
+                last_err = exc
+                continue
+            if resp.status_code == 200 and data.get("business_discovery"):
+                return data["business_discovery"]
+            err = (data.get("error") or {}).get("message", "")
+            # "cannot be found" = not a professional account (or no such user):
+            # a BD miss, not an infrastructure failure — fall through to Hiker
+            if "cannot be found" in err.lower() or "could not find" in err.lower():
+                return None
+            last_err = err or f"HTTP {resp.status_code}"
+        logger.warning("Business Discovery failed for @%s (%s); falling back to HikerAPI", handle, last_err)
+        return None
+
+    def fetch_profile(self, handle: str) -> tuple[IGProfile, float]:
+        handle = handle.lower().lstrip("@")
+
+        bd = self._business_discovery(handle)
+        if bd is None:
+            # personal account / BD unavailable — the paid provider sees everything
+            return self._hiker_provider().fetch_profile(handle)
+
+        recent_posts = [
+            IGPost(
+                id=str(m.get("id") or ""),
+                shortcode=(m.get("permalink") or "").rstrip("/").rsplit("/", 1)[-1] or None,
+                caption=m.get("caption"),
+                posted_at=HikerAPIIGProvider._ts(m.get("timestamp")),
+                like_count=m.get("like_count"),
+                comment_count=m.get("comments_count"),
+            )
+            for m in (bd.get("media") or {}).get("data", [])
+        ]
+
+        profile = IGProfile(
+            handle=handle,
+            display_name=bd.get("name"),
+            bio_text=bd.get("biography"),
+            bio_website_url=bd.get("website"),
+            follower_count=bd.get("followers_count"),
+            following_count=bd.get("follows_count"),
+            post_count=bd.get("media_count"),
+            is_private=False,  # BD only returns public professional accounts
+            is_business_account=True,  # by definition of a BD hit
+            comments_disabled=bool(recent_posts) and all((p.comment_count or 0) == 0 for p in recent_posts),
+            oldest_post_at=min((p.posted_at for p in recent_posts if p.posted_at), default=None),
+            recent_posts=recent_posts,
+            source="meta_bd",
+            raw={},
+        )
+
+        # Paid top-up ONLY for what Meta doesn't expose. Skip entirely when
+        # there's nothing to fetch (no posts, or comments off everywhere).
+        cost = 0.0
+        needs_comments = any((p.comment_count or 0) > 0 for p in recent_posts)
+        try:
+            hiker = self._hiker_provider()
+            user = hiker._get("/v1/user/by/username", username=handle)
+            user_id = str((user or {}).get("pk") or (user or {}).get("id") or "")
+            if user_id:
+                profile.ig_user_id = user_id
+                medias = []
+                if needs_comments:
+                    medias = hiker._chunk_items(hiker._get("/v1/user/medias/chunk", user_id=user_id))
+                    medias = medias[: HikerAPIIGProvider.MAX_POSTS]
+                    profile.comments = hiker._fetch_comments(medias)
+                tagged_medias = hiker._chunk_items(hiker._get("/v1/user/tag/medias/chunk", user_id=user_id))
+                tagged_medias = tagged_medias[: HikerAPIIGProvider.MAX_TAGGED]
+                profile.tagged_posts = [
+                    IGTag(
+                        post_id=str(m.get("pk") or m.get("id") or ""),
+                        tagger_username=(m.get("user") or {}).get("username"),
+                        posted_at=HikerAPIIGProvider._ts(m.get("taken_at")),
+                    )
+                    for m in tagged_medias
+                ]
+                profile.tagged_post_comments = hiker._fetch_comments(tagged_medias)
+            cost = hiker._cost()
+            profile.source = "meta_bd+hikerapi"
+        except IGProviderError as exc:
+            # free data still makes a useful card; don't fail the check
+            logger.warning("HikerAPI top-up unavailable for @%s: %s — serving Meta data only", handle, exc)
+        except Exception as exc:
+            logger.warning("HikerAPI top-up failed for @%s: %s — serving Meta data only", handle, exc)
+
+        return profile, cost
+
+
 class ScreenshotVisionIGProvider(IGProvider):
     """Fallback path when Apify is unavailable/blocked: user forwards a
     screenshot instead of a handle, a vision LLM reads what's on screen."""
@@ -669,4 +802,6 @@ def get_provider() -> IGProvider:
         return ApifyIGProvider()
     if settings.IG_PROVIDER == "hikerapi":
         return HikerAPIIGProvider()
+    if settings.IG_PROVIDER == "meta":
+        return MetaFirstIGProvider()
     return InstaloaderIGProvider()
