@@ -137,7 +137,16 @@ def run_check(handle: str, on_profile=None, on_experience=None, requested_by: st
         ledger.add("llm.synthesize_card", synth_cost)
         evidence_lines = synthesis.get("evidence_lines") or [s.evidence for s in signals if s.matched]
 
-        card_text = render_card(handle, risk_band, patterns_matched, patterns_total, evidence_lines, experience)
+        card_text = render_card(
+            handle,
+            risk_band,
+            patterns_matched,
+            patterns_total,
+            evidence_lines,
+            experience,
+            signals=signals_json,
+            weighted_score=weighted_score,
+        )
 
         snapshot = RiskSnapshot(
             seller_id=seller.id,

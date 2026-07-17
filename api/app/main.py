@@ -42,6 +42,7 @@ def health_config(probe_admin_id: str = ""):
         "ig_provider": settings.IG_PROVIDER,
         "ig_session_set": bool(settings.IG_SESSION_ID),
         "hikerapi_token_set": bool(settings.HIKERAPI_TOKEN),
+        "ig_dm_configured": bool(settings.IG_DM_ACCESS_TOKEN and settings.IG_DM_VERIFY_TOKEN),
         "admin_ids_configured": len([x for x in settings.ADMIN_USER_IDS.split(",") if x.strip()]),
         "webhook_url_set": bool(settings.WEBHOOK_URL),
     }
@@ -238,3 +239,14 @@ except Exception as exc:
     import logging
 
     logging.getLogger(__name__).warning("webhook mount skipped: %s", exc)
+
+# Instagram DM bot: Meta POSTs DMs to /instagram/webhook. Mounting is safe
+# with the env vars unset — the verify endpoint just 403s until configured.
+try:
+    from bot.instagram import router as instagram_router
+
+    app.include_router(instagram_router)
+except Exception as exc:
+    import logging
+
+    logging.getLogger(__name__).warning("instagram webhook mount skipped: %s", exc)

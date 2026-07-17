@@ -147,3 +147,101 @@ def _record_cached_check(db, seller_id: int, chat_id: str) -> None:
     db.commit()
 
 
+# --- report intake (shared by the Telegram and Instagram bots) --------------
+
+def extract_payment_identity(image_bytes: bytes) -> dict | None:
+    """Vision-extract UPI id / phone from a payment screenshot. PII: routed
+    through get_pii_llm(), never free-tier Gemini in prod."""
+    import json as _json
+    import re as _re
+
+    from engine.llm import get_pii_llm
+
+    text, _cost = get_pii_llm().complete_vision(
+        "Extract payment identifiers from this payment screenshot. Return ONLY JSON: "
+        '{"upi_id": str|null, "phone": str|null}. Do not guess.',
+        image_bytes,
+        "image/jpeg",
+        max_tokens=200,
+    )
+    m = _re.search(r"\{.*\}", text or "", _re.DOTALL)
+    if not m:
+        return None
+    data = _json.loads(m.group(0))
+    if data.get("upi_id"):
+        return {"kind": "upi", "value": data["upi_id"].lower()}
+    if data.get("phone"):
+        return {"kind": "phone", "value": _re.sub(r"\D", "", data["phone"])[-10:]}
+    return None
+
+
+def save_report(data: dict, chat_id: str, narrative: str | None) -> None:
+    """Persist a buyer report (+ payment identity link, trust and spam scores).
+    `data` needs seller_id; optional: kind, evidence_file_id, payment."""
+    import logging
+
+    from shared.models import PaymentIdentity, Report, SellerPaymentLink
+
+    logger = logging.getLogger(__name__)
+    db = SessionLocal()
+    try:
+        payment_identity_id = None
+        payment = data.get("payment")
+        if payment:
+            pi = (
+                db.query(PaymentIdentity)
+                .filter(PaymentIdentity.kind == payment["kind"], PaymentIdentity.value == payment["value"])
+                .one_or_none()
+            )
+            if pi is None:
+                pi = PaymentIdentity(kind=payment["kind"], value=payment["value"])
+                db.add(pi)
+                db.flush()
+            payment_identity_id = pi.id
+            existing_link = (
+                db.query(SellerPaymentLink)
+                .filter_by(seller_id=data["seller_id"], payment_identity_id=pi.id)
+                .one_or_none()
+            )
+            if existing_link is None:
+                db.add(SellerPaymentLink(seller_id=data["seller_id"], payment_identity_id=pi.id, source="user_report"))
+
+        issue_categories = None
+        if narrative:
+            try:
+                from engine.issues import classify_text
+
+                issue_categories, _sentiment, _cost = classify_text(narrative)
+            except Exception as exc:
+                logger.warning("report narrative classification failed: %s", exc)
+
+        from engine.reporter_trust import reporter_trust
+        from engine.spam_detect import check_smear_burst, spam_score_for_report
+
+        has_evidence = bool(data.get("evidence_file_id")) and payment_identity_id is not None
+        trust = reporter_trust(db, chat_id, has_evidence=has_evidence)
+
+        report = Report(
+            seller_id=data["seller_id"],
+            reporter_chat_id=chat_id,
+            kind=data.get("kind", "other"),
+            narrative=narrative,
+            evidence_file_id=data.get("evidence_file_id"),
+            payment_identity_id=payment_identity_id,
+            issue_categories=issue_categories,
+            reporter_trust=trust,
+        )
+        db.add(report)
+        db.flush()
+        report.spam_score = spam_score_for_report(db, report, trust)
+        db.commit()
+
+        # burst check runs AFTER commit so this report counts toward the window
+        try:
+            check_smear_burst(db, data["seller_id"])
+        except Exception as exc:
+            logger.warning("smear burst check failed: %s", exc)
+    finally:
+        db.close()
+
+

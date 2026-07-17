@@ -35,6 +35,17 @@ def send_telegram(chat_id: str, text: str) -> None:
         logger.error("Telegram send to %s failed: %s", chat_id, exc)
 
 
+def send_user(chat_id: str, text: str) -> None:
+    """Channel-aware send: "ig:<igsid>" chat ids answer over Instagram DM,
+    everything else is a Telegram chat id."""
+    if str(chat_id).startswith("ig:"):
+        from bot.instagram import send_instagram
+
+        send_instagram(str(chat_id).removeprefix("ig:"), text)
+    else:
+        send_telegram(chat_id, text)
+
+
 def _early_signal_text(profile) -> str | None:
     reference = profile.oldest_post_at or profile.account_created_at
     if reference is None:
@@ -70,7 +81,7 @@ def cold_check_job(
         if chat_id:
             text = _early_signal_text(profile)
             if text:
-                send_telegram(chat_id, text)
+                send_user(chat_id, text)
 
     sent_experience = {"done": False}
 
@@ -82,7 +93,7 @@ def cold_check_job(
 
             text = render_experience_early(handle, experience)
             if text:
-                send_telegram(chat_id, text)
+                send_user(chat_id, text)
                 sent_experience["done"] = True
 
     try:
@@ -98,21 +109,24 @@ def cold_check_job(
             db.commit()
 
         if chat_id:
-            footer = "\n─ Got scammed by them? Tap: /report"
-            send_telegram(chat_id, card.card_text + footer)
+            if str(chat_id).startswith("ig:"):
+                footer = "\n─ Got scammed by them? Reply: report"
+            else:
+                footer = "\n─ Got scammed by them? Tap: /report"
+            send_user(chat_id, card.card_text + footer)
         return card.check_id
     except SystemExit as exc:
         # engine raises SystemExit on unfetchable profiles; report kindly
         refund_quota()
         if chat_id:
             if sent_experience["done"]:
-                send_telegram(
+                send_user(
                     chat_id,
                     f"⚠️ Couldn't complete the Instagram profile scan for @{handle} — {exc}. "
                     "The community reviews above still stand.",
                 )
             else:
-                send_telegram(chat_id, f"Couldn't check @{handle} — {exc}. Is the handle correct and public?")
+                send_user(chat_id, f"Couldn't check @{handle} — {exc}. Is the handle correct and public?")
         return None
     except Exception:
         refund_quota()
@@ -198,7 +212,25 @@ def send_due_followups() -> int:
         db.close()
 
 
+FOLLOWUP_CHOICES = [
+    ("Bought, all good ✅", "bought_good"),
+    ("Bought, came late 🐢", "bought_late"),
+    ("Bad quality 👎", "bought_bad"),
+    ("Never arrived ❌", "never_arrived"),
+    ("Didn't buy", "didnt_buy"),
+]
+
+
 def _send_followup_keyboard(chat_id: str, handle: str, followup_id: int) -> None:
+    if str(chat_id).startswith("ig:"):
+        from bot.instagram import send_instagram
+
+        send_instagram(
+            str(chat_id).removeprefix("ig:"),
+            f"You checked @{handle} a little while ago — did you buy from them?",
+            quick_replies=[(title, f"fu:{followup_id}:{resp}") for title, resp in FOLLOWUP_CHOICES],
+        )
+        return
     if not settings.TELEGRAM_BOT_TOKEN:
         logger.warning("TELEGRAM_BOT_TOKEN unset; would ask followup %s to %s", followup_id, chat_id)
         return

@@ -75,6 +75,14 @@ class Settings(BaseSettings):
     IG_SESSION_ID: str = ""
     IG_CSRF_TOKEN: str = ""  # optional; bootstrapped automatically when empty
 
+    # Instagram DM bot (Meta Instagram Messaging API). All three come from the
+    # Meta app: access token for the connected IG professional account, the
+    # webhook verify token you choose, and the app secret for payload
+    # signature checks. Empty = Instagram DM surface disabled.
+    IG_DM_ACCESS_TOKEN: str = ""
+    IG_DM_VERIFY_TOKEN: str = ""
+    IG_DM_APP_SECRET: str = ""
+
     CORS_ORIGINS: str = "*"
 
 
