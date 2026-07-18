@@ -29,6 +29,55 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/privacy")
+def privacy_policy():
+    """Static privacy policy — required by Meta to switch the app Live."""
+    from fastapi.responses import HTMLResponse
+
+    return HTMLResponse(
+        """<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>InstaCop — Privacy Policy</title>
+<style>body{font-family:system-ui,sans-serif;max-width:720px;margin:40px auto;padding:0 20px;line-height:1.6;color:#222}h1{font-size:1.6em}h2{font-size:1.15em;margin-top:1.6em}</style>
+</head><body>
+<h1>InstaCop Privacy Policy</h1>
+<p>Last updated: July 2026</p>
+<p>InstaCop is a seller-safety service: you send us an Instagram shop's handle
+(via Instagram DM or Telegram) and we reply with a risk report built from public
+information and community reviews.</p>
+<h2>What we collect</h2>
+<ul>
+<li><b>Messages you send us</b> — the handles you ask us to check, your replies
+to follow-up questions, and reports you choose to submit.</li>
+<li><b>Your messaging id</b> — the platform-scoped id (Instagram or Telegram)
+needed to reply to you. We cannot see your password, email, or phone number.</li>
+<li><b>Public seller information</b> — public profile data of the shops being
+checked (follower counts, posts, public comments) and public community reviews
+(e.g. Reddit threads).</li>
+<li><b>Screenshots you send</b> — if you submit a payment screenshot with a scam
+report, we extract payment identifiers (e.g. UPI id) to link scam reports about
+the same operator. Screenshots are processed for this purpose only.</li>
+</ul>
+<h2>What we do with it</h2>
+<p>We use this data solely to produce risk reports and to protect future buyers
+(your report about a seller strengthens the next buyer's check). We do not sell
+personal data, run ads, or share your identity with the sellers being checked.</p>
+<h2>Retention &amp; deletion</h2>
+<p>Check history and reports are retained to keep the fraud database useful. To
+have your data deleted, message us on Instagram
+(<a href="https://instagram.com/insta_cop_">@insta_cop_</a>) or email
+<a href="mailto:sagaranand.001@gmail.com">sagaranand.001@gmail.com</a> and we
+will remove your messages, reports, and messaging id within 30 days.</p>
+<h2>Third parties</h2>
+<p>We use hosting and data providers (Render, Supabase, Upstash, Meta Platforms,
+HikerAPI, Google Gemini) as processors to run the service. Public seller data is
+processed under legitimate-interest grounds for fraud prevention.</p>
+<h2>Contact</h2>
+<p>Questions: <a href="mailto:sagaranand.001@gmail.com">sagaranand.001@gmail.com</a></p>
+</body></html>"""
+    )
+
+
 @app.get("/health/config")
 def health_config(probe_admin_id: str = ""):
     """Deploy diagnostics: which commit is live and whether key env vars
