@@ -75,7 +75,10 @@ def render_card(
     if score is None:
         lines.append("⚪ Not enough data for a verdict yet — here's what we could see:")
     else:
-        lines.append(f"{emoji} Scam likelihood: {score}/100 — {read}")
+        # display on a 1-9 scale out of 10: never claim 0 (certainty of safety)
+        # or 10 (certainty of fraud) — both are indefensible
+        score10 = max(1, min(9, round(score / 10)))
+        lines.append(f"{emoji} Scam likelihood: {score10}/10 — {read}")
     lines.append(f"Fraud patterns: {patterns_matched} of {patterns_total} checked patterns matched")
 
     exp_cats = (experience or {}).get("categories") or {}
