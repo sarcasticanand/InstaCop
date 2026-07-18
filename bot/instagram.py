@@ -21,6 +21,7 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 from datetime import datetime, timezone
 
 import httpx
@@ -41,8 +42,13 @@ MAX_MSG_CHARS = 950  # IG DM hard limit is 1000; chunk long cards
 STATE_TTL = 1800
 
 START_TEXT = (
-    "I check Instagram shops for known fraud patterns before you pay. "
-    "Send me the shop's @handle or profile link."
+    "👋 I'm InstaCop — I check Instagram shops for scam signals before you pay.\n\n"
+    "Send me any of these:\n"
+    "• the shop's @handle or profile link\n"
+    "• a forwarded ad, story or post from the shop\n"
+    "• a screenshot of their profile\n\n"
+    "You'll get a scam-likelihood report built from community reviews and "
+    "account analysis. Already got scammed by a shop? Reply 'report'."
 )
 
 # quick-reply titles are capped at 20 chars by Meta
@@ -190,6 +196,16 @@ async def receive_webhook(request: Request):
 
 # --- event handling (sync; runs in a thread) ----------------------------------
 
+def _maybe_welcome(igsid: str) -> None:
+    """First contact ever -> introduce what the bot can do, then continue
+    processing whatever they sent."""
+    try:
+        if service.get_redis().set(f"igdm:seen:{igsid}", 1, nx=True):
+            send_instagram(igsid, START_TEXT)
+    except Exception:
+        pass
+
+
 def _handle_event(event: dict) -> None:
     message = event.get("message") or {}
     igsid = str((event.get("sender") or {}).get("id") or "")
@@ -201,10 +217,11 @@ def _handle_event(event: dict) -> None:
         _handle_payload(igsid, quick_reply)
         return
 
-    attachments = message.get("attachments") or []
-    images = [a for a in attachments if a.get("type") == "image" and (a.get("payload") or {}).get("url")]
-    if images:
-        _handle_image(igsid, images[0]["payload"]["url"])
+    _maybe_welcome(igsid)
+
+    attachments = [a for a in (message.get("attachments") or []) if (a.get("payload") or {}).get("url")]
+    if attachments:
+        _handle_attachment(igsid, attachments[0])
         return
 
     text = (message.get("text") or "").strip()
@@ -243,19 +260,91 @@ def _handle_text(igsid: str, text: str) -> None:
     _run_check(igsid, handle)
 
 
-def _handle_image(igsid: str, url: str) -> None:
-    state = _get_state(igsid)
+_PERMALINK_OWNER_RE = re.compile(r"instagram\.com/([a-z0-9._]{2,30})/(?:p|reel|tv)/", re.I)
+_PERMALINK_RE = re.compile(r"instagram\.com/(?:p|reel|tv|stories)/", re.I)
+
+AD_EXTRACT_PROMPT = (
+    "This image is an Instagram ad, story, post or profile that a user forwarded. "
+    "Identify the seller/brand it belongs to. Return ONLY JSON: "
+    '{"handle": str|null, "brand_name": str|null}. '
+    "handle only if an @username or profile name is actually visible — do not guess."
+)
+
+
+def _brand_from_permalink(url: str) -> str | None:
+    """Shared posts/reels arrive with an instagram.com permalink. Owner is in
+    the URL for the /<user>/p/<code> form; otherwise resolve the media via
+    HikerAPI (1 paid request)."""
+    m = _PERMALINK_OWNER_RE.search(url or "")
+    if m:
+        return m.group(1).lower()
+    if not _PERMALINK_RE.search(url or ""):
+        return None
     try:
-        image_bytes = httpx.get(url, timeout=20).content
+        from engine.ig_provider import HikerAPIIGProvider
+
+        media = HikerAPIIGProvider()._get("/v1/media/by/url", url=url)
+        username = ((media or {}).get("user") or {}).get("username")
+        return username.lower() if username else None
     except Exception as exc:
-        logger.warning("IG image download failed: %s", exc)
-        send_instagram(igsid, "Couldn't read that image — try again?")
+        logger.warning("shared-post owner lookup failed for %s: %s", url, exc)
+        return None
+
+
+def _brand_from_image(image_bytes: bytes) -> tuple[str | None, str | None]:
+    """(handle, brand_name) vision-extracted from a forwarded ad/story/post."""
+    import re as _re
+
+    from engine.llm import get_pii_llm
+
+    try:
+        text, _ = get_pii_llm().complete_vision(AD_EXTRACT_PROMPT, image_bytes, "image/jpeg", max_tokens=200)
+        m = _re.search(r"\{.*\}", text or "", _re.DOTALL)
+        data = json.loads(m.group(0)) if m else {}
+    except Exception as exc:
+        logger.warning("ad image extraction failed: %s", exc)
+        return None, None
+    handle = (data.get("handle") or "").lstrip("@").strip().lower() or None
+    return handle, data.get("brand_name")
+
+
+def _handle_attachment(igsid: str, attachment: dict) -> None:
+    """Anything forwarded into the chat: shared post/reel/story, ad, or a
+    plain image. Goal is always the same — figure out WHICH seller this is
+    and run the check."""
+    payload = attachment.get("payload") or {}
+    url = payload.get("url") or ""
+    state = _get_state(igsid)
+
+    # shared post/reel with a permalink → owner is knowable without vision
+    handle = _brand_from_permalink(url) or _brand_from_permalink(payload.get("title") or "")
+    if handle:
+        send_instagram(igsid, f"That's @{handle} — checking them now.")
+        _run_check(igsid, handle)
         return
 
+    try:
+        resp = httpx.get(url, timeout=20)
+        content_type = resp.headers.get("content-type", "")
+        media_bytes = resp.content
+    except Exception as exc:
+        logger.warning("IG attachment download failed: %s", exc)
+        send_instagram(igsid, "Couldn't read that — try again, or type the shop's @handle.")
+        return
+
+    if "image" not in content_type and attachment.get("type") not in ("image", "share", "story_mention"):
+        send_instagram(
+            igsid,
+            "I can't identify the shop from a video yet — type their @handle, "
+            "or send a screenshot of their profile or the ad.",
+        )
+        return
+
+    # mid-report: an image here is the payment screenshot
     if state and state.get("state") == "awaiting_screenshot":
         payment = None
         try:
-            payment = service.extract_payment_identity(image_bytes)
+            payment = service.extract_payment_identity(media_bytes)
         except Exception as exc:
             logger.warning("payment screenshot extraction failed: %s", exc)
         data = state["data"]
@@ -266,20 +355,19 @@ def _handle_image(igsid: str, url: str) -> None:
         send_instagram(igsid, f"Got the screenshot{note}. One line about what happened (or reply Skip):")
         return
 
-    # not mid-report: treat it as a profile screenshot to check
-    send_instagram(igsid, "Reading the screenshot…")
-    try:
-        from engine.ig_provider import ScreenshotVisionIGProvider
-
-        profile, _ = ScreenshotVisionIGProvider().extract_from_screenshot(image_bytes)
-        handle = profile.handle if profile.handle != "unknown" else None
-    except Exception as exc:
-        logger.warning("screenshot handle extraction failed: %s", exc)
-        handle = None
-    if handle is None:
-        send_instagram(igsid, "Couldn't read a handle from that screenshot — type the @handle instead.")
+    send_instagram(igsid, "Reading that…")
+    handle, brand_name = _brand_from_image(media_bytes)
+    if handle:
+        _run_check(igsid, handle)
         return
-    _run_check(igsid, handle)
+    if brand_name:
+        send_instagram(
+            igsid,
+            f"This looks like “{brand_name}”, but their exact @handle isn't visible in the image. "
+            "Type the @handle and I'll run the full check.",
+        )
+        return
+    send_instagram(igsid, "Couldn't identify the shop from that — type their @handle instead.")
 
 
 def _handle_payload(igsid: str, payload: str) -> None:
