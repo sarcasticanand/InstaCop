@@ -55,6 +55,25 @@ REPORT_KINDS = [
 ]
 
 
+# --- diagnostics --------------------------------------------------------------
+# Redis counters surfaced by /health/data so a dead DM pipeline can be
+# localized remotely: did Meta call us at all, did the signature pass, did
+# our reply send? (Render free tier has no log access from outside.)
+
+def _bump(key: str) -> None:
+    try:
+        service.get_redis().incr(f"igdm:stat:{key}")
+    except Exception:
+        pass
+
+
+def _note(key: str, value: str) -> None:
+    try:
+        service.get_redis().set(f"igdm:stat:{key}", (value or "")[:300])
+    except Exception:
+        pass
+
+
 # --- outbound ----------------------------------------------------------------
 
 def send_instagram(igsid: str, text: str, quick_replies: list[tuple[str, str]] | None = None) -> None:
@@ -80,10 +99,15 @@ def send_instagram(igsid: str, text: str, quick_replies: list[tuple[str, str]] |
             ).raise_for_status()
         except httpx.HTTPStatusError as exc:
             logger.error("IG send to %s failed: %s — %s", igsid, exc, exc.response.text[:300])
+            _bump("send_fail")
+            _note("last_send_error", exc.response.text)
             return
         except Exception as exc:
             logger.error("IG send to %s failed: %s", igsid, exc)
+            _bump("send_fail")
+            _note("last_send_error", str(exc))
             return
+    _bump("send_ok")
 
 
 def _chunks(text: str) -> list[str]:
@@ -131,17 +155,21 @@ async def verify_webhook(
     if hub_mode == "subscribe" and settings.IG_DM_VERIFY_TOKEN and hmac.compare_digest(
         hub_verify_token, settings.IG_DM_VERIFY_TOKEN
     ):
+        _bump("verify_ok")
         return PlainTextResponse(hub_challenge)
+    _bump("verify_fail")
     raise HTTPException(403, "verify token mismatch")
 
 
 @router.post("/instagram/webhook")
 async def receive_webhook(request: Request):
     body = await request.body()
+    _bump("post")
     if settings.IG_DM_APP_SECRET:
         signature = request.headers.get("X-Hub-Signature-256", "")
         expected = "sha256=" + hmac.new(settings.IG_DM_APP_SECRET.encode(), body, hashlib.sha256).hexdigest()
         if not hmac.compare_digest(signature, expected):
+            _bump("sig_fail")
             raise HTTPException(401, "bad signature")
 
     try:
@@ -151,10 +179,12 @@ async def receive_webhook(request: Request):
 
     for entry in payload.get("entry", []):
         for event in entry.get("messaging", []):
+            _bump("event")
             try:
                 await asyncio.to_thread(_handle_event, event)
             except Exception:
                 logger.exception("IG DM event handling failed")
+                _bump("event_error")
     return {"ok": True}
 
 
