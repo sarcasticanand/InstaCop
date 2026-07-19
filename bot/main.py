@@ -58,7 +58,7 @@ async def allowlist_callback_middleware(handler, event, data):
 
 START_TEXT = (
     "hey, I'm InstaCop. before you buy from an Instagram shop, I check if it's "
-    "legit — buyer reviews, scam reports, account red flags.\n\n"
+    "legit: buyer reviews, scam reports, account red flags.\n\n"
     "send me the shop's @handle or link, their website, a screenshot, or "
     "forward their profile here (Share → Telegram → me).\n\n"
     "already got scammed by a shop? tap /report and I'll log it to warn the next person."
@@ -129,30 +129,30 @@ async def _handle_check(message: Message, raw: str):
     user_id = message.from_user.id
     if _is_group(message):
         if not service.allow_group_check(message.chat.id):
-            await message.answer("this group hit today's check limit (20) — try again tomorrow")
+            await message.answer("this group hit today's check limit (20), try again tomorrow")
             return
 
     chat_id = str(message.chat.id)
     outcome = await asyncio.to_thread(service.start_check, handle, chat_id, user_id)
 
     if outcome.kind == "rate_limited_cold":
-        await message.answer("you've used today's 5 fresh checks. shops we've already checked still work — new ones reset tomorrow")
+        await message.answer("you've used today's 5 fresh checks. shops we've already checked still work, new ones reset tomorrow")
         return
     if outcome.kind == "rate_limited_cached":
-        await message.answer("you've hit today's limit — resets tomorrow")
+        await message.answer("you've hit today's limit, resets tomorrow")
         return
     if outcome.kind == "global_capped":
-        await message.answer("we're at capacity today. already-checked shops still work — try this one tomorrow")
+        await message.answer("we're at capacity today. already-checked shops still work, try this one tomorrow")
         return
 
     if outcome.kind == "queued":
-        await message.answer(f"on it — checking @{handle}. what buyers say lands in a few seconds, the full account scan takes a couple of minutes")
+        await message.answer(f"on it, checking @{handle}. what buyers say lands in a few seconds, the full account scan takes a couple of minutes")
         return
 
-    text = outcome.card_text or f"couldn't pull a report for @{handle} right now — try again in a bit"
+    text = outcome.card_text or f"couldn't pull a report for @{handle} right now, try again in a bit"
     if outcome.banner:
         text = f"{text}\n\n{outcome.banner}"
-    text += "\n— got scammed by them? tap /report"
+    text += "\ngot scammed by them? tap /report"
     await message.answer(text)
 
 
@@ -160,14 +160,14 @@ async def _handle_website(message: Message, url: str):
     from urllib.parse import urlparse
 
     host = urlparse(url).hostname or url
-    await message.answer(f"looking into {host} — give me a sec")
+    await message.answer(f"looking into {host}, give me a sec")
     try:
         from engine.website import check_website
 
         handle, reply, _cost = await asyncio.to_thread(check_website, url)
     except Exception as exc:
         logger.warning("website check failed for %s: %s", url, exc)
-        await message.answer("couldn't load that site — if the shop has an Instagram, send me the @handle")
+        await message.answer("couldn't load that site. if the shop has an Instagram, send me the @handle")
         return
     if reply:
         await message.answer(reply)
@@ -239,7 +239,7 @@ async def cmd_report(message: Message, state: FSMContext):
         from engine.reporter_trust import report_rate_ok
 
         if not report_rate_ok(db, chat_id):
-            await message.answer("we've logged enough from you today — thanks. try again tomorrow")
+            await message.answer("we've logged enough from you today, thanks. try again tomorrow")
             return
         last = (
             db.query(Seller)
@@ -260,7 +260,7 @@ async def cmd_report(message: Message, state: FSMContext):
         inline_keyboard=[[InlineKeyboardButton(text=label, callback_data=f"rk:{kind}")] for kind, label in REPORT_KINDS]
     )
     await state.set_state(ReportFlow.choosing_kind)
-    await message.answer(f"reporting @{last.ig_handle} — what happened?", reply_markup=kb)
+    await message.answer(f"reporting @{last.ig_handle}. what happened?", reply_markup=kb)
 
 
 @router.callback_query(ReportFlow.choosing_kind, F.data.startswith("rk:"))
@@ -268,7 +268,7 @@ async def report_kind_chosen(cb: CallbackQuery, state: FSMContext):
     kind = cb.data.removeprefix("rk:")
     await state.update_data(kind=kind)
     await state.set_state(ReportFlow.awaiting_screenshot)
-    await cb.message.answer("got a payment screenshot? send it over — it makes the report way stronger (or /skip)")
+    await cb.message.answer("got a payment screenshot? send it over, it makes the report way stronger (or /skip)")
     await cb.answer()
 
 
@@ -301,7 +301,7 @@ async def report_narrative(message: Message, state: FSMContext):
     data = await state.get_data()
     await state.clear()
     await asyncio.to_thread(_save_report, data, str(message.chat.id), narrative)
-    await message.answer("logged. this warns the next person who checks them — appreciate you")
+    await message.answer("logged. this warns the next person who checks them. appreciate you")
 
 
 # report intake logic lives in bot/service.py (shared with the Instagram bot)
@@ -325,9 +325,9 @@ async def followup_answer(cb: CallbackQuery):
         db.close()
 
     if response in ("never_arrived", "bought_bad"):
-        await cb.message.answer("sorry that happened. tap /report and I'll log it — it warns the next buyer")
+        await cb.message.answer("sorry that happened. tap /report and I'll log it, it warns the next buyer")
     else:
-        await cb.message.answer("noted, thanks — this genuinely helps other buyers")
+        await cb.message.answer("noted, thanks. this genuinely helps other buyers")
     await cb.answer()
 
 
@@ -354,7 +354,7 @@ async def any_text(message: Message, state: FSMContext):
     if await state.get_state() is not None:
         return  # mid-flow message for a state handler; never treat as a handle
     if (message.text or "").startswith("/"):
-        await message.answer("don't know that command — send a shop's @handle, link or website to check them")
+        await message.answer("don't know that command. send a shop's @handle, link or website to check them")
         return
     site = service.parse_website(message.text)
     if site:
@@ -374,7 +374,7 @@ async def photo_check(message: Message, state: FSMContext):
     await message.answer("reading that, one sec")
     handle = await _handle_from_screenshot(message)
     if handle is None:
-        await message.answer("couldn't make out the handle from that — mind typing it?")
+        await message.answer("couldn't make out the handle from that. mind typing it?")
         return
     await _handle_check(message, handle)
 

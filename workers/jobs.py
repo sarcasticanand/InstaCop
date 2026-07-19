@@ -113,9 +113,9 @@ def cold_check_job(
 
         if chat_id:
             if str(chat_id).startswith("ig:"):
-                footer = "\n— got scammed by them? reply 'report'"
+                footer = "\ngot scammed by them? reply 'report'"
             else:
-                footer = "\n— got scammed by them? tap /report"
+                footer = "\ngot scammed by them? tap /report"
             send_user(chat_id, card.card_text + footer)
         return card.check_id
     except SystemExit as exc:
@@ -125,11 +125,11 @@ def cold_check_job(
             if sent_experience["done"]:
                 send_user(
                     chat_id,
-                    f"couldn't finish the account scan for @{handle} — {exc}. "
+                    f"couldn't finish the account scan for @{handle} ({exc}). "
                     "the buyer reviews above still stand",
                 )
             else:
-                send_user(chat_id, f"couldn't check @{handle} — {exc}. sure the handle's right and the account's public?")
+                send_user(chat_id, f"couldn't check @{handle} ({exc}). sure the handle's right and the account's public?")
         return None
     except Exception:
         refund_quota()
@@ -230,7 +230,7 @@ def _send_followup_keyboard(chat_id: str, handle: str, followup_id: int) -> None
 
         send_instagram(
             str(chat_id).removeprefix("ig:"),
-            f"hey — you checked @{handle} a while back. did you end up buying?",
+            f"hey, you checked @{handle} a while back. did you end up buying?",
             quick_replies=[(title, f"fu:{followup_id}:{resp}") for title, resp in FOLLOWUP_CHOICES],
         )
         return
@@ -249,7 +249,7 @@ def _send_followup_keyboard(chat_id: str, handle: str, followup_id: int) -> None
             f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage",
             json={
                 "chat_id": chat_id,
-                "text": f"hey — you checked @{handle} a while back. did you end up buying?",
+                "text": f"hey, you checked @{handle} a while back. did you end up buying?",
                 "reply_markup": {"inline_keyboard": buttons},
             },
             timeout=15,

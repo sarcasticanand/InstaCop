@@ -27,9 +27,9 @@ CATEGORY_LABEL = {
 # finding as what we flagged.
 _POSITIVE_BY_SIGNAL = {
     6: "No fraud reports on file for this seller",
-    2: "Product photos appear original — not lifted from other sites",
+    2: "Product photos appear original, not lifted from other sites",
     9: "No payment accounts linked to past scams",
-    4: "Comments under posts look healthy — no complaint pattern",
+    4: "Comments under posts look healthy, no complaint pattern",
     3: "Real customers tag them in their own posts",
     7: "Follower engagement looks organic",
     5: "Bio website checks out",
@@ -73,12 +73,12 @@ def render_card(
 
     lines = [f"@{handle}"]
     if score is None:
-        lines.append("⚪ Not enough data for a verdict yet — here's what we could see:")
+        lines.append("⚪ Not enough data for a verdict yet. here's what we could see:")
     else:
         # display on a 1-9 scale out of 10: never claim 0 (certainty of safety)
         # or 10 (certainty of fraud) — both are indefensible
         score10 = max(1, min(9, round(score / 10)))
-        lines.append(f"{emoji} Scam likelihood: {score10}/10 — {read}")
+        lines.append(f"{emoji} Scam likelihood: {score10}/10 ({read})")
     lines.append(f"Fraud patterns: {patterns_matched} of {patterns_total} checked patterns matched")
 
     exp_cats = (experience or {}).get("categories") or {}
@@ -87,7 +87,7 @@ def render_card(
     # A clean fraud scan with bad buyer reviews must not read as a clean bill
     # of health — the complaints are the headline for that seller.
     if has_serious_complaints and risk_band in ("insufficient", "low"):
-        lines.append("⚠️ Not flagged for fraud, but real buyers report problems — read below before ordering.")
+        lines.append("⚠️ Not flagged for fraud, but real buyers report problems. read below before ordering.")
 
     good = positive_lines(signals or [], experience)
     if good:
@@ -130,7 +130,7 @@ def experience_lines(experience: dict) -> list[str]:
             shown += 1
     if not shown:
         if any(level == "isolated" for level in exp_cats.values()):
-            lines.append("△ Only scattered one-off complaints — nothing looks systematic")
+            lines.append("△ Only scattered one-off complaints, nothing looks systematic")
         else:
             lines.append("✓ No recurring complaints found in community reviews")
     if experience.get("summary"):
@@ -146,7 +146,7 @@ def render_experience_early(handle: str, experience: dict | None) -> str | None:
     if not experience or not experience.get("has_data"):
         return None
     return "\n".join(
-        [f"@{handle} — what buyers say (account scan still running):"] + experience_lines(experience)
+        [f"@{handle}: what buyers say (account scan still running)"] + experience_lines(experience)
     )
 
 

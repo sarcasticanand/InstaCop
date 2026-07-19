@@ -43,7 +43,7 @@ STATE_TTL = 1800
 
 START_TEXT = (
     "hey, I'm InstaCop. before you buy from an Instagram shop, I check if it's "
-    "legit — buyer reviews, scam reports, account red flags.\n\n"
+    "legit: buyer reviews, scam reports, account red flags.\n\n"
     "send me any of these:\n"
     "• the shop's @handle or link\n"
     "• a forwarded ad, story or post\n"
@@ -236,7 +236,7 @@ def _handle_text(igsid: str, text: str) -> None:
         narrative = None if text.lower() in ("skip", "/skip") else text
         service.save_report(state["data"], f"ig:{igsid}", narrative)
         _set_state(igsid, None)
-        send_instagram(igsid, "logged. this warns the next person who checks them — appreciate you")
+        send_instagram(igsid, "logged. this warns the next person who checks them. appreciate you")
         return
     if state and state.get("state") == "awaiting_screenshot":
         if text.lower() in ("skip", "/skip"):
@@ -261,7 +261,7 @@ def _handle_text(igsid: str, text: str) -> None:
 
     handle = service.parse_handle(text)
     if handle is None:
-        send_instagram(igsid, "send me a shop's @handle, their link or website, or forward their ad — I'll take it from there")
+        send_instagram(igsid, "send me a shop's @handle, their link or website, or forward their ad. I'll take it from there")
         return
     _run_check(igsid, handle)
 
@@ -270,14 +270,14 @@ def _run_website(igsid: str, url: str) -> None:
     from urllib.parse import urlparse
 
     host = urlparse(url).hostname or url
-    send_instagram(igsid, f"looking into {host} — give me a sec")
+    send_instagram(igsid, f"looking into {host}, give me a sec")
     try:
         from engine.website import check_website
 
         handle, reply, _cost = check_website(url)
     except Exception as exc:
         logger.warning("website check failed for %s: %s", url, exc)
-        send_instagram(igsid, "couldn't load that site — if the shop has an Instagram, send me the @handle")
+        send_instagram(igsid, "couldn't load that site. if the shop has an Instagram, send me the @handle")
         return
     if reply:
         send_instagram(igsid, reply)
@@ -344,7 +344,7 @@ def _handle_attachment(igsid: str, attachment: dict) -> None:
     # shared post/reel with a permalink → owner is knowable without vision
     handle = _brand_from_permalink(url) or _brand_from_permalink(payload.get("title") or "")
     if handle:
-        send_instagram(igsid, f"that's @{handle} — checking them now")
+        send_instagram(igsid, f"that's @{handle}, checking them now")
         _run_check(igsid, handle)
         return
 
@@ -354,13 +354,13 @@ def _handle_attachment(igsid: str, attachment: dict) -> None:
         media_bytes = resp.content
     except Exception as exc:
         logger.warning("IG attachment download failed: %s", exc)
-        send_instagram(igsid, "couldn't open that — try again, or just type the shop's @handle")
+        send_instagram(igsid, "couldn't open that. try again, or just type the shop's @handle")
         return
 
     if "image" not in content_type and attachment.get("type") not in ("image", "share", "story_mention"):
         send_instagram(
             igsid,
-            "can't tell which shop that is from a video yet — type their @handle, or send a screenshot of the ad",
+            "can't tell which shop that is from a video yet. type their @handle or send a screenshot of the ad",
         )
         return
 
@@ -387,11 +387,11 @@ def _handle_attachment(igsid: str, attachment: dict) -> None:
     if brand_name:
         send_instagram(
             igsid,
-            f"looks like “{brand_name}” but I can't see their exact @handle in this — "
+            f"looks like “{brand_name}” but I can't see their exact @handle in this. "
             "type it out and I'll run the full check",
         )
         return
-    send_instagram(igsid, "couldn't tell which shop that is — type their @handle and I'll check them")
+    send_instagram(igsid, "couldn't tell which shop that is. type their @handle and I'll check them")
 
 
 def _handle_payload(igsid: str, payload: str) -> None:
@@ -401,12 +401,12 @@ def _handle_payload(igsid: str, payload: str) -> None:
     if payload.startswith("rk:"):
         state = _get_state(igsid)
         if not state or state.get("state") != "choosing_kind":
-            send_instagram(igsid, "that report timed out — reply 'report' to start over")
+            send_instagram(igsid, "that report timed out. reply 'report' to start over")
             return
         data = state["data"]
         data["kind"] = payload.removeprefix("rk:")
         _set_state(igsid, {"state": "awaiting_screenshot", "data": data})
-        send_instagram(igsid, "got a payment screenshot? send it over — it makes the report way stronger (or reply skip)")
+        send_instagram(igsid, "got a payment screenshot? send it over, it makes the report way stronger (or reply skip)")
         return
     logger.info("IG DM: unknown payload %r from %s", payload, igsid)
 
@@ -416,22 +416,22 @@ def _run_check(igsid: str, handle: str) -> None:
     outcome = service.start_check(handle, f"ig:{igsid}", user_id)
 
     if outcome.kind == "rate_limited_cold":
-        send_instagram(igsid, "you've used today's 5 fresh checks. shops we've already checked still work — new ones reset tomorrow")
+        send_instagram(igsid, "you've used today's 5 fresh checks. shops we've already checked still work, new ones reset tomorrow")
         return
     if outcome.kind == "rate_limited_cached":
-        send_instagram(igsid, "you've hit today's limit — resets tomorrow")
+        send_instagram(igsid, "you've hit today's limit, resets tomorrow")
         return
     if outcome.kind == "global_capped":
-        send_instagram(igsid, "we're at capacity today. already-checked shops still work — try this one tomorrow")
+        send_instagram(igsid, "we're at capacity today. already-checked shops still work, try this one tomorrow")
         return
     if outcome.kind == "queued":
-        send_instagram(igsid, f"on it — checking @{handle}. what buyers say lands in a few seconds, the full account scan takes a couple of minutes")
+        send_instagram(igsid, f"on it, checking @{handle}. what buyers say lands in a few seconds, the full account scan takes a couple of minutes")
         return
 
-    text = outcome.card_text or f"couldn't pull a report for @{handle} right now — try again in a bit"
+    text = outcome.card_text or f"couldn't pull a report for @{handle} right now, try again in a bit"
     if outcome.banner:
         text = f"{text}\n\n{outcome.banner}"
-    text += "\n— got scammed by them? reply 'report'"
+    text += "\ngot scammed by them? reply 'report'"
     send_instagram(igsid, text)
 
 
@@ -444,7 +444,7 @@ def _start_report(igsid: str) -> None:
         from engine.reporter_trust import report_rate_ok
 
         if not report_rate_ok(db, chat_id):
-            send_instagram(igsid, "we've logged enough from you today — thanks. try again tomorrow")
+            send_instagram(igsid, "we've logged enough from you today, thanks. try again tomorrow")
             return
         last = (
             db.query(Seller)
@@ -463,7 +463,7 @@ def _start_report(igsid: str) -> None:
     _set_state(igsid, {"state": "choosing_kind", "data": {"seller_id": last.id, "handle": last.ig_handle}})
     send_instagram(
         igsid,
-        f"reporting @{last.ig_handle} — what happened?",
+        f"reporting @{last.ig_handle}. what happened?",
         quick_replies=[(label, f"rk:{kind}") for kind, label in REPORT_KINDS],
     )
 
@@ -483,6 +483,6 @@ def _record_followup(igsid: str, payload: str) -> None:
         db.close()
 
     if response in ("never_arrived", "bought_bad"):
-        send_instagram(igsid, "sorry that happened. reply 'report' and I'll log it — it warns the next buyer")
+        send_instagram(igsid, "sorry that happened. reply 'report' and I'll log it, it warns the next buyer")
     else:
-        send_instagram(igsid, "noted, thanks — this genuinely helps other buyers")
+        send_instagram(igsid, "noted, thanks. this genuinely helps other buyers")
