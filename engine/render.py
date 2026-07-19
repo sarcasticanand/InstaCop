@@ -151,24 +151,28 @@ def render_experience_early(handle: str, experience: dict | None) -> str | None:
 
 
 def render_from_snapshot(handle: str, snapshot) -> str:
-    """Rebuild a card from a stored RiskSnapshot; prefers the stored card_text,
-    falls back to matched signals' evidence for older snapshots."""
-    stored = (snapshot.signals or {}).get("card_text")
-    if stored:
-        return stored
-    signals = (snapshot.signals or {}).get("signals", [])
-    evidence = [
-        s.get("evidence", "")
-        for s in signals
-        if s.get("status") == "matched" and s.get("evidence")
-    ][:4]
-    return render_card(
-        handle,
-        snapshot.risk_band,
-        snapshot.patterns_matched,
-        snapshot.patterns_total,
-        evidence,
-        experience=(snapshot.signals or {}).get("experience"),
-        signals=signals,
-        weighted_score=(snapshot.signals or {}).get("weighted_score") or 0,
+    """Card for a stored RiskSnapshot. ALWAYS re-renders from the stored
+    components so cached sellers get the current wording/format the moment
+    it changes — the frozen card_text is only a fallback for ancient
+    snapshots that predate component storage."""
+    data = snapshot.signals or {}
+    signals = data.get("signals", [])
+    if signals:
+        evidence = [
+            s.get("evidence", "")
+            for s in signals
+            if s.get("status") == "matched" and s.get("evidence")
+        ][:4]
+        return render_card(
+            handle,
+            snapshot.risk_band,
+            snapshot.patterns_matched,
+            snapshot.patterns_total,
+            evidence,
+            experience=data.get("experience"),
+            signals=signals,
+            weighted_score=data.get("weighted_score") or 0,
+        )
+    return data.get("card_text") or render_card(
+        handle, snapshot.risk_band, snapshot.patterns_matched, snapshot.patterns_total, []
     )

@@ -633,7 +633,9 @@ class MetaFirstIGProvider(IGProvider):
     _GRAPH_HOSTS = ("https://graph.instagram.com/v23.0", "https://graph.facebook.com/v23.0")
 
     def __init__(self, token: str | None = None):
-        self._token = token or settings.IG_DM_ACCESS_TOKEN
+        from shared.meta_token import get_meta_token
+
+        self._token = token or get_meta_token()
         if not self._token:
             raise IGProviderError("IG_DM_ACCESS_TOKEN is not set (needed for Business Discovery)")
         self._hiker: HikerAPIIGProvider | None = None

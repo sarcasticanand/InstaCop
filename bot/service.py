@@ -160,7 +160,7 @@ def start_check(handle: str, chat_id: str, user_id: int) -> CheckOutcome:
             return CheckOutcome(
                 kind="stale",
                 card_text=render_from_snapshot(handle, snapshot),
-                banner="⚠️ This report is over a week old — a fresh check is running; check again in a few minutes.",
+                banner="heads up, this report is over a week old. running a fresh one now, check back in a few minutes",
             )
 
         if not allow_cold_check(user_id):

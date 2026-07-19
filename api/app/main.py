@@ -122,13 +122,17 @@ def health_data(db: Session = Depends(get_db)):
             datetime.fromtimestamp(float(last), tz=timezone.utc).isoformat() if last else None
         )
         igdm = {}
-        for key in ("verify_ok", "verify_fail", "post", "sig_fail", "event", "event_error", "send_ok", "send_fail"):
+        for key in (
+            "verify_ok", "verify_fail", "post", "sig_fail", "event",
+            "event_error", "dedup_skip", "send_ok", "send_fail", "check_fail",
+        ):
             val = r.get(f"igdm:stat:{key}")
             if val is not None:
                 igdm[key] = int(val)
-        err = r.get("igdm:stat:last_send_error")
-        if err:
-            igdm["last_send_error"] = err.decode(errors="replace")
+        for key in ("last_send_error", "last_check_error"):
+            err = r.get(f"igdm:stat:{key}")
+            if err:
+                igdm[key] = err.decode(errors="replace")
         out["igdm"] = igdm
     except Exception:
         out["queued_jobs"] = None

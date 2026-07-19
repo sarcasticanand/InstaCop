@@ -92,6 +92,12 @@ def run_scheduler():
             except Exception as exc:
                 logger.error("monthly sweep check failed: %s", exc)
             try:
+                from shared.meta_token import maybe_refresh_meta_token
+
+                maybe_refresh_meta_token()
+            except Exception as exc:
+                logger.error("meta token refresh failed: %s", exc)
+            try:
                 from engine.operator_graph import autopopulate_from_payment_identities
                 from shared.db import SessionLocal
 

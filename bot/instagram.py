@@ -86,7 +86,10 @@ def _note(key: str, value: str) -> None:
 def send_instagram(igsid: str, text: str, quick_replies: list[tuple[str, str]] | None = None) -> None:
     """Send a DM (sync — callable from worker threads). quick_replies:
     [(title, payload)]. Long texts are chunked; quick replies ride the last chunk."""
-    if not settings.IG_DM_ACCESS_TOKEN:
+    from shared.meta_token import get_meta_token
+
+    token = get_meta_token()
+    if not token:
         logger.warning("IG_DM_ACCESS_TOKEN unset; would have sent to %s: %s", igsid, text[:80])
         return
     chunks = _chunks(text)
@@ -100,7 +103,7 @@ def send_instagram(igsid: str, text: str, quick_replies: list[tuple[str, str]] |
         try:
             httpx.post(
                 GRAPH_URL,
-                params={"access_token": settings.IG_DM_ACCESS_TOKEN},
+                params={"access_token": token},
                 json={"recipient": {"id": igsid}, "message": message},
                 timeout=15,
             ).raise_for_status()
@@ -187,12 +190,34 @@ async def receive_webhook(request: Request):
     for entry in payload.get("entry", []):
         for event in entry.get("messaging", []):
             _bump("event")
-            try:
-                await asyncio.to_thread(_handle_event, event)
-            except Exception:
-                logger.exception("IG DM event handling failed")
-                _bump("event_error")
+            # Meta redelivers aggressively when we answer slowly (free-tier
+            # cold starts take ~1 min) — every message must be processed at
+            # most once, keyed by its mid.
+            mid = (event.get("message") or {}).get("mid") or ""
+            if mid:
+                try:
+                    if not service.get_redis().set(f"igdm:mid:{mid}", 1, nx=True, ex=86400):
+                        _bump("dedup_skip")
+                        continue
+                except Exception:
+                    pass
+            # ack immediately; handling (checks, page fetches) can take far
+            # longer than Meta's delivery timeout and must not block the 200
+            task = asyncio.create_task(asyncio.to_thread(_safe_handle, event))
+            _BG_TASKS.add(task)
+            task.add_done_callback(_BG_TASKS.discard)
     return {"ok": True}
+
+
+_BG_TASKS: set = set()
+
+
+def _safe_handle(event: dict) -> None:
+    try:
+        _handle_event(event)
+    except Exception:
+        logger.exception("IG DM event handling failed")
+        _bump("event_error")
 
 
 # --- event handling (sync; runs in a thread) ----------------------------------

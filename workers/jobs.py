@@ -46,6 +46,20 @@ def send_user(chat_id: str, text: str) -> None:
         send_telegram(chat_id, text)
 
 
+def _job_stat(key: str, error: str | None = None) -> None:
+    """Failure counters surfaced by /health/data — RQ failures are otherwise
+    invisible on a host with no external log access."""
+    try:
+        import redis as _redis
+
+        r = _redis.from_url(settings.REDIS_URL)
+        r.incr(f"igdm:stat:{key}")
+        if error:
+            r.set("igdm:stat:last_check_error", error[:300])
+    except Exception:
+        pass
+
+
 def _early_signal_text(profile) -> str | None:
     reference = profile.oldest_post_at or profile.account_created_at
     if reference is None:
@@ -121,6 +135,7 @@ def cold_check_job(
     except SystemExit as exc:
         # engine raises SystemExit on unfetchable profiles; report kindly
         refund_quota()
+        _job_stat("check_fail", f"{handle}: {exc}")
         if chat_id:
             if sent_experience["done"]:
                 send_user(
@@ -131,8 +146,9 @@ def cold_check_job(
             else:
                 send_user(chat_id, f"couldn't check @{handle} ({exc}). sure the handle's right and the account's public?")
         return None
-    except Exception:
+    except Exception as exc:
         refund_quota()
+        _job_stat("check_fail", f"{handle}: {type(exc).__name__}: {exc}")
         raise
     finally:
         db.close()
