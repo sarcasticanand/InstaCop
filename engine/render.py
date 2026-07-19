@@ -146,7 +146,7 @@ def render_experience_early(handle: str, experience: dict | None) -> str | None:
     if not experience or not experience.get("has_data"):
         return None
     return "\n".join(
-        [f"@{handle} — community reviews (fraud scan still running):"] + experience_lines(experience)
+        [f"@{handle} — what buyers say (account scan still running):"] + experience_lines(experience)
     )
 
 

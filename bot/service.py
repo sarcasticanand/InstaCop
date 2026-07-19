@@ -44,6 +44,38 @@ def parse_handle(text: str) -> str | None:
     return None
 
 
+# TLDs we treat as "this is a website, not a dotted IG handle". A handle like
+# shop.bluorng stays a handle; bluorng.com becomes a site check.
+_COMMON_TLDS = {
+    "com", "in", "shop", "store", "co", "net", "org", "io", "me", "us", "uk",
+    "au", "ca", "de", "fr", "nl", "es", "it", "xyz", "site", "online", "biz",
+    "info", "club", "fashion", "boutique", "app", "ai", "tech", "life", "world",
+}
+
+
+def parse_website(text: str) -> str | None:
+    """Returns a normalized https URL when the message is a (non-Instagram)
+    website; None otherwise. Checked BEFORE parse_handle by callers, because
+    'bluorng.com' would otherwise pass as a dotted handle."""
+    from urllib.parse import urlparse
+
+    t = (text or "").strip()
+    m = re.search(r"https?://\S+", t, re.I)
+    if m:
+        cand = m.group(0).rstrip(").,>\"'")
+    else:
+        if not re.fullmatch(r"(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+/?", t, re.I):
+            return None
+        tld = t.rstrip("/").rsplit(".", 1)[-1].lower()
+        if tld not in _COMMON_TLDS:
+            return None
+        cand = "https://" + t.rstrip("/")
+    host = (urlparse(cand).hostname or "").lower()
+    if not host or "instagram.com" in host or host == "instagr.am":
+        return None  # instagram links belong to parse_handle
+    return cand
+
+
 def _bump_daily(key: str, limit: int) -> bool:
     """Returns True if within limit after incrementing."""
     r = get_redis()

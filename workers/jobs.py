@@ -54,7 +54,10 @@ def _early_signal_text(profile) -> str | None:
         reference = reference.replace(tzinfo=timezone.utc)
     age_days = (datetime.now(timezone.utc) - reference).days
     if age_days <= 90:
-        return f"Early signal: account looks ~{age_days} days old and already selling. Wait for the full report before paying."
+        return (
+            f"early heads-up: this account looks only ~{age_days} days old and it's already selling. "
+            "hold off on paying until the full report's in"
+        )
     return None
 
 
@@ -110,9 +113,9 @@ def cold_check_job(
 
         if chat_id:
             if str(chat_id).startswith("ig:"):
-                footer = "\n─ Got scammed by them? Reply: report"
+                footer = "\n— got scammed by them? reply 'report'"
             else:
-                footer = "\n─ Got scammed by them? Tap: /report"
+                footer = "\n— got scammed by them? tap /report"
             send_user(chat_id, card.card_text + footer)
         return card.check_id
     except SystemExit as exc:
@@ -122,11 +125,11 @@ def cold_check_job(
             if sent_experience["done"]:
                 send_user(
                     chat_id,
-                    f"⚠️ Couldn't complete the Instagram profile scan for @{handle} — {exc}. "
-                    "The community reviews above still stand.",
+                    f"couldn't finish the account scan for @{handle} — {exc}. "
+                    "the buyer reviews above still stand",
                 )
             else:
-                send_user(chat_id, f"Couldn't check @{handle} — {exc}. Is the handle correct and public?")
+                send_user(chat_id, f"couldn't check @{handle} — {exc}. sure the handle's right and the account's public?")
         return None
     except Exception:
         refund_quota()
@@ -227,7 +230,7 @@ def _send_followup_keyboard(chat_id: str, handle: str, followup_id: int) -> None
 
         send_instagram(
             str(chat_id).removeprefix("ig:"),
-            f"You checked @{handle} a little while ago — did you buy from them?",
+            f"hey — you checked @{handle} a while back. did you end up buying?",
             quick_replies=[(title, f"fu:{followup_id}:{resp}") for title, resp in FOLLOWUP_CHOICES],
         )
         return
@@ -246,7 +249,7 @@ def _send_followup_keyboard(chat_id: str, handle: str, followup_id: int) -> None
             f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage",
             json={
                 "chat_id": chat_id,
-                "text": f"You checked @{handle} a little while ago — did you buy from them?",
+                "text": f"hey — you checked @{handle} a while back. did you end up buying?",
                 "reply_markup": {"inline_keyboard": buttons},
             },
             timeout=15,
