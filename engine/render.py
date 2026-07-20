@@ -46,10 +46,13 @@ def positive_lines(signals: list[dict], experience: dict | None = None, limit: i
         out.append(f"{positive} buyer(s) reported a good experience")
 
     clean = {s.get("number"): s for s in (signals or []) if s.get("status") == "not_matched"}
-    age = ((clean.get(1) or {}).get("data") or {}).get("age_days")
+    age_data = (clean.get(1) or {}).get("data") or {}
+    age = age_data.get("age_days")
     if age and age >= 365:
         years = age // 365
         out.append(f"Account has ~{years} year{'s' if years > 1 else ''} of posting history")
+    elif age_data.get("established") and age_data.get("post_count"):
+        out.append(f"Established account with {age_data['post_count']} posts")
     for num in _POSITIVE_ORDER:
         if num in clean:
             out.append(_POSITIVE_BY_SIGNAL[num])
