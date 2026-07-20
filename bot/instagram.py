@@ -310,15 +310,22 @@ def _run_website(igsid: str, url: str) -> None:
         _run_check(igsid, handle)
 
 
-_PERMALINK_OWNER_RE = re.compile(r"instagram\.com/([a-z0-9._]{2,30})/(?:p|reel|tv)/", re.I)
+# instagram.com/stories/<owner>/<id> puts the owner right in the path; the
+# /p|reel|tv/ forms put it before the media segment.
+_PERMALINK_OWNER_RE = re.compile(r"instagram\.com/(?:stories/)?([a-z0-9._]{2,30})/(?:p/|reel/|tv/|\d)", re.I)
 _PERMALINK_RE = re.compile(r"instagram\.com/(?:p|reel|tv|stories)/", re.I)
 
 AD_EXTRACT_PROMPT = (
-    "This image is an Instagram ad, story, post or profile that a user forwarded. "
-    "Identify the seller/brand it belongs to. Return ONLY JSON: "
+    "This is an Instagram ad, story, post, reel or profile a user forwarded — it may be an image "
+    "or a short video. Watch/read all of it and identify the seller/brand it belongs to. The @username "
+    "usually shows as the story header, an @mention sticker, a tag, or on-screen text. Return ONLY JSON: "
     '{"handle": str|null, "brand_name": str|null}. '
     "handle only if an @username or profile name is actually visible — do not guess."
 )
+
+# Gemini inline media rides in the request body; keep well under the ~20MB
+# request cap. Shared stories/reels (<=60s) are almost always a few MB.
+_INLINE_MEDIA_CAP = 18 * 1024 * 1024
 
 
 def _brand_from_permalink(url: str) -> str | None:
@@ -341,18 +348,19 @@ def _brand_from_permalink(url: str) -> str | None:
         return None
 
 
-def _brand_from_image(image_bytes: bytes) -> tuple[str | None, str | None]:
-    """(handle, brand_name) vision-extracted from a forwarded ad/story/post."""
+def _brand_from_media(media_bytes: bytes, mime_type: str) -> tuple[str | None, str | None]:
+    """(handle, brand_name) extracted from a forwarded image OR video via
+    Gemini vision, which reads video frames natively."""
     import re as _re
 
     from engine.llm import get_pii_llm
 
     try:
-        text, _ = get_pii_llm().complete_vision(AD_EXTRACT_PROMPT, image_bytes, "image/jpeg", max_tokens=200)
+        text, _ = get_pii_llm().complete_vision(AD_EXTRACT_PROMPT, media_bytes, mime_type, max_tokens=200)
         m = _re.search(r"\{.*\}", text or "", _re.DOTALL)
         data = json.loads(m.group(0)) if m else {}
     except Exception as exc:
-        logger.warning("ad image extraction failed: %s", exc)
+        logger.warning("ad media extraction failed (%s): %s", mime_type, exc)
         return None, None
     handle = (data.get("handle") or "").lstrip("@").strip().lower() or None
     return handle, data.get("brand_name")
@@ -374,23 +382,23 @@ def _handle_attachment(igsid: str, attachment: dict) -> None:
         return
 
     try:
-        resp = httpx.get(url, timeout=20)
-        content_type = resp.headers.get("content-type", "")
+        resp = httpx.get(url, timeout=30)
+        content_type = (resp.headers.get("content-type") or "").split(";")[0].strip().lower()
         media_bytes = resp.content
     except Exception as exc:
         logger.warning("IG attachment download failed: %s", exc)
         send_instagram(igsid, "couldn't open that. try again, or just type the shop's @handle")
         return
 
-    if "image" not in content_type and attachment.get("type") not in ("image", "share", "story_mention"):
-        send_instagram(
-            igsid,
-            "can't tell which shop that is from a video yet. type their @handle or send a screenshot of the ad",
-        )
-        return
+    att_type = attachment.get("type") or ""
+    is_image = "image" in content_type or att_type in ("image", "story_mention")
+    is_video = "video" in content_type or att_type in ("video", "ig_reel", "reel", "story")
+    if not content_type and not (is_image or is_video):
+        # no content-type header and untyped: assume image (most shares are)
+        is_image = True
 
     # mid-report: an image here is the payment screenshot
-    if state and state.get("state") == "awaiting_screenshot":
+    if state and state.get("state") == "awaiting_screenshot" and is_image:
         payment = None
         try:
             payment = service.extract_payment_identity(media_bytes)
@@ -404,8 +412,16 @@ def _handle_attachment(igsid: str, attachment: dict) -> None:
         send_instagram(igsid, f"got the screenshot{note}. one line on what happened? (or reply skip)")
         return
 
-    send_instagram(igsid, "reading that, one sec")
-    handle, brand_name = _brand_from_image(media_bytes)
+    if not (is_image or is_video):
+        send_instagram(igsid, "couldn't read that. type the shop's @handle and I'll check them")
+        return
+    if is_video and len(media_bytes) > _INLINE_MEDIA_CAP:
+        send_instagram(igsid, "that clip's too big for me to read. type the shop's @handle and I'll run it")
+        return
+
+    mime = content_type or ("video/mp4" if is_video else "image/jpeg")
+    send_instagram(igsid, "reading that, one sec" if is_image else "watching that clip, give me a sec")
+    handle, brand_name = _brand_from_media(media_bytes, mime)
     if handle:
         _run_check(igsid, handle)
         return
