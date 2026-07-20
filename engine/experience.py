@@ -149,12 +149,29 @@ def build_experience_profile(db: Session, seller_id: int) -> dict:
 
 
 SUMMARY_SYSTEM = (
-    "Write 2-4 short plain sentences summarizing buyer-experience findings for an Instagram "
-    "seller, from the structured evidence given. Factual, no verdict nouns (scammer/fraudster/"
-    "con artist/criminal/thief/cheat are banned), no buy/don't-buy advice. Mention only "
-    "categories with data; if a category is clean, you may note it briefly (e.g. 'No fraud "
-    'reports.\'). Return ONLY JSON: {"summary": str}.'
+    "You're telling a friend what actual buyers said about an Instagram clothing seller, so they can "
+    "decide whether to buy. Use ONLY the reviewer notes given. Quote or paraphrase SPECIFIC things "
+    "buyers experienced: sizing ran small, took 3 weeks to ship, fabric felt thin, print cracked after "
+    "a wash, great quality for the price, ghosted on DMs, refund took ages, etc. "
+    "Write plain and direct, 1-3 short sentences, like a real person, not a brand or an AI. "
+    "Hard bans: verdict nouns (scammer/fraudster/con artist/criminal/thief/cheat), buy/don't-buy advice, "
+    "and vague filler with no concrete detail ('frequently mentioned', 'discussed alongside other "
+    "retailers', 'public inquiries focus on', 'social media discussions'). "
+    "If the notes have NO concrete first-hand buyer experience — just brand name-drops or generic chatter — "
+    'return an empty string. Better to say nothing than pad. Return ONLY JSON: {"summary": str}.'
 )
+
+# phrases that mark LLM filler with no real substance — reject and show nothing
+_SLOP_MARKERS = (
+    "frequently mentioned", "discussed alongside", "public inquir", "social media discussion",
+    "focus on the quality", "no fraud reports were identified", "in the provided data",
+    "is a brand that", "is a popular", "gaining popularity", "various", "overall",
+)
+
+
+def _looks_like_slop(text: str) -> bool:
+    low = text.lower()
+    return any(m in low for m in _SLOP_MARKERS)
 
 
 def synthesize_findings_summary(profile: dict, evidence_notes: list[str]) -> tuple[str, float]:
@@ -162,7 +179,7 @@ def synthesize_findings_summary(profile: dict, evidence_notes: list[str]) -> tup
     if not profile["has_data"]:
         return "", 0.0
     if not active and profile["positive_signals"]:
-        return "Buyer feedback so far is positive; no recurring issues reported.", 0.0
+        return "buyers who've ordered seem happy, no recurring issues so far.", 0.0
 
     payload = json.dumps({"levels": active, "positive_signals": profile["positive_signals"], "example_notes": evidence_notes[:6]})
     try:
@@ -173,10 +190,19 @@ def synthesize_findings_summary(profile: dict, evidence_notes: list[str]) -> tup
         logger.warning("findings summary synthesis failed: %s", exc)
         summary, cost = "", 0.0
 
-    if not summary or _violates_banned_words([summary]):
-        # deterministic fallback from levels alone
-        bits = [f"{cat.replace('_', ' ')}: {v['level']}" for cat, v in active.items()]
-        summary = "Reported issues — " + "; ".join(bits) + "."
+    # drop generic/AI-slop summaries and banned-word summaries entirely
+    if summary and (_violates_banned_words([summary]) or _looks_like_slop(summary)):
+        summary = ""
+
+    if not summary and active:
+        # concrete fallback straight from the graded categories — no fluff
+        label = {
+            "fraud": "never-delivered reports", "quality": "quality complaints",
+            "delivery": "slow/late delivery", "as_described": "not-as-described complaints",
+            "responsiveness": "poor customer service",
+        }
+        bits = [f"{label.get(c, c.replace('_', ' '))} ({v['contributors']})" for c, v in active.items()]
+        summary = "buyers flagged: " + ", ".join(bits)
     return summary, cost
 
 

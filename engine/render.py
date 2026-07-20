@@ -142,8 +142,15 @@ def experience_lines(experience: dict) -> list[str]:
 
 def render_experience_early(handle: str, experience: dict | None) -> str | None:
     """Fast first reply: community reviews only, sent while the slower
-    Instagram scan is still running. None = nothing worth sending."""
+    Instagram scan is still running. None = nothing worth sending yet — send
+    only when there's real signal (a complaint, a positive, or a concrete
+    summary), otherwise the full card covers it a moment later."""
     if not experience or not experience.get("has_data"):
+        return None
+    cats = experience.get("categories") or {}
+    has_complaint = any(lvl in ("isolated", "recurring", "severe") for lvl in cats.values())
+    worth_sending = has_complaint or experience.get("positive_signals") or experience.get("summary")
+    if not worth_sending:
         return None
     return "\n".join(
         [f"@{handle}: what buyers say (account scan still running)"] + experience_lines(experience)
