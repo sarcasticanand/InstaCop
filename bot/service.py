@@ -17,6 +17,7 @@ URL_RE = re.compile(r"instagram\.com/([a-zA-Z0-9._]{1,30})")
 COLD_CHECKS_PER_USER_PER_DAY = 5
 CACHED_CHECKS_PER_USER_PER_DAY = 30
 GROUP_CHECKS_PER_DAY = 20
+QUESTIONS_PER_USER_PER_DAY = 25
 
 _redis = None
 
@@ -104,6 +105,13 @@ def allow_cached_check(user_id: int) -> bool:
 
 def allow_group_check(chat_id: int) -> bool:
     return _bump_daily(f"rl:group:{chat_id}", GROUP_CHECKS_PER_DAY)
+
+
+def allow_question(user_key) -> bool:
+    """Daily cap on conversational follow-ups so the LLM can't be farmed."""
+    if _is_admin(user_key):
+        return True
+    return _bump_daily(f"rl:q:{user_key}", QUESTIONS_PER_USER_PER_DAY)
 
 
 def allow_global_cold_check() -> bool:

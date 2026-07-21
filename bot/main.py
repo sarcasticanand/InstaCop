@@ -362,6 +362,14 @@ async def any_text(message: Message, state: FSMContext):
         return
     handle = service.parse_handle(message.text)
     if handle is None:
+        text = message.text or ""
+        if len(text) >= 4 and service.allow_question(message.from_user.id):
+            from engine.conversation import answer_about_seller
+
+            answer = await asyncio.to_thread(answer_about_seller, str(message.chat.id), text)
+            if answer:
+                await message.answer(answer)
+                return
         await message.answer("send me a shop's @handle, their link or website, and I'll check them out")
         return
     await _handle_check(message, handle)

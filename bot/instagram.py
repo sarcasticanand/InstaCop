@@ -286,6 +286,15 @@ def _handle_text(igsid: str, text: str) -> None:
 
     handle = service.parse_handle(text)
     if handle is None:
+        # not a handle/link/command — try answering it as a follow-up question
+        # about the seller they most recently checked
+        if len(text) >= 4 and service.allow_question(igsid):
+            from engine.conversation import answer_about_seller
+
+            answer = answer_about_seller(f"ig:{igsid}", text)
+            if answer:
+                send_instagram(igsid, answer)
+                return
         send_instagram(igsid, "send me a shop's @handle, their link or website, or forward their ad. I'll take it from there")
         return
     _run_check(igsid, handle)
