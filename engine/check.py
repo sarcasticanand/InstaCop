@@ -6,7 +6,7 @@ from shared.models import Check, RiskSnapshot, Seller
 from shared.schemas import RiskCard, SignalResult
 
 from engine.cost import CostLedger
-from engine.ig_provider import IGProviderError, get_provider
+from engine.ig_provider import IGProviderCapacityError, IGProviderError, get_provider
 from engine.llm import synthesize_card
 from engine.render import render_card
 from engine.scoring import compute_band
@@ -96,8 +96,16 @@ def run_check(handle: str, on_profile=None, on_experience=None, requested_by: st
         provider = get_provider()
         try:
             profile, fetch_cost = provider.fetch_profile(handle)
+        except IGProviderCapacityError as exc:
+            import logging
+
+            logging.getLogger(__name__).warning("provider capacity limit on %s: %s", handle, exc)
+            raise SystemExit(
+                f"heads up, I could only do a light check on @{handle} right now. its a personal account or "
+                "the deep scan is briefly maxed out, so treat this as partial"
+            )
         except IGProviderError as exc:
-            raise SystemExit(f"Could not fetch @{handle}: {exc}")
+            raise SystemExit(str(exc))
         ledger.add("ig_provider.fetch_profile", fetch_cost)
 
         if profile.is_private:

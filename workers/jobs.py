@@ -137,14 +137,12 @@ def cold_check_job(
         refund_quota()
         _job_stat("check_fail", f"{handle}: {exc}")
         if chat_id:
+            # engine now raises self-contained, user-ready messages
+            msg = str(exc)
             if sent_experience["done"]:
-                send_user(
-                    chat_id,
-                    f"couldn't finish the account scan for @{handle} ({exc}). "
-                    "the buyer reviews above still stand",
-                )
+                send_user(chat_id, f"{msg}\nthe buyer reviews above still stand.")
             else:
-                send_user(chat_id, f"couldn't check @{handle} ({exc}). sure the handle's right and the account's public?")
+                send_user(chat_id, msg)
         return None
     except Exception as exc:
         refund_quota()

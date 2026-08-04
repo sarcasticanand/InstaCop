@@ -24,6 +24,12 @@ class IGProviderError(Exception):
     pass
 
 
+class IGProviderCapacityError(IGProviderError):
+    """Provider is temporarily unable to serve (out of balance, throttled,
+    auth expired) — distinct from a genuine 'no such account'. Lets callers
+    show a soft 'limited info' message instead of a hard failure."""
+
+
 class IGProvider(ABC):
     @abstractmethod
     def fetch_profile(self, handle: str) -> tuple[IGProfile, float]:
@@ -296,7 +302,7 @@ class InstaloaderIGProvider(IGProvider):
                 raise IGProviderError(
                     "Instagram is limiting our access right now, or the handle doesn't exist. Try again in a few minutes"
                 )
-            raise IGProviderError(f"Instagram profile @{handle} does not exist")
+            raise IGProviderError(f"couldn't find @{handle} on Instagram. double-check the handle?")
         except instaloader.LoginRequiredException:
             logger.warning("Instaloader: login required for @%s — set IG_SESSION_ID", handle)
             raise IGProviderError("Instagram is limiting our access right now. Try again in a few minutes")
@@ -471,8 +477,10 @@ class HikerAPIIGProvider(IGProvider):
         if resp.status_code == 404:
             return None
         if resp.status_code in (401, 402, 403):
-            raise IGProviderError(
-                f"HikerAPI rejected the request ({resp.status_code}) — check the token and account balance"
+            # 402 = out of balance, 401/403 = token issue/throttle. Detailed
+            # text is preserved for logs; callers translate to a soft message.
+            raise IGProviderCapacityError(
+                f"HikerAPI unavailable ({resp.status_code}: balance/token) for {path}"
             )
         resp.raise_for_status()
         return resp.json()
@@ -482,7 +490,7 @@ class HikerAPIIGProvider(IGProvider):
 
         user = self._get("/v1/user/by/username", username=handle)
         if not user or not isinstance(user, dict) or not (user.get("pk") or user.get("id")):
-            raise IGProviderError(f"Instagram profile @{handle} does not exist")
+            raise IGProviderError(f"couldn't find @{handle} on Instagram. double-check the handle?")
 
         user_id = str(user.get("pk") or user.get("id"))
         is_business = user.get("is_business")
